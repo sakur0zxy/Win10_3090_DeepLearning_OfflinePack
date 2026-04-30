@@ -38,7 +38,7 @@ manifest.json
 requirements\torch-cu128.lock.txt
 requirements\research.lock.txt
 scripts\verify_torch_cuda.py
-README-Win10-3090-Offline.md
+README.md
 docs\troubleshooting.md
 docs\common-errors.md
 ```
@@ -226,7 +226,7 @@ Download 不会尝试安装任何东西
 
 任务：
 
-1. 编写 `README-Win10-3090-Offline.md`。
+1. 编写 `README.md`。
 2. 写清 PowerShell 执行策略绕过方式。
 3. 写清联网机推荐流程。
 4. 写清离线机推荐流程。

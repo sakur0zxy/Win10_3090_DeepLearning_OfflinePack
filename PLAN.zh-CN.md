@@ -108,7 +108,7 @@ Win10_3090_DeepLearning_OfflinePack\
   manifest.json
   PLAN.md
   PLAN.zh-CN.md
-  README-Win10-3090-Offline.md
+  README.md
 
   downloads\
     drivers\
