@@ -10,3 +10,5 @@
 | `没有检测到 nvidia-smi` | 手动安装 NVIDIA 驱动并重启。 |
 | `虚拟环境已存在` | 第一阶段不支持复用旧环境，需要确认删除并重建。 |
 | `torch.version.cuda == None` | 安装到了 CPU 版 PyTorch，重新检查 PyTorch cu128 wheels。 |
+| `没有发现可登记的本地文件` | 先把 NVIDIA 驱动放到 `downloads\drivers`，或把 CUDA/Git/VS Code 安装包放入对应 optional 目录。 |
+| `CUDA Toolkit 文件体积偏小` | 很可能是 network installer，不适合离线电脑；请下载 local installer。 |

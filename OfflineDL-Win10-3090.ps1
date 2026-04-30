@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidateSet("Download", "Check", "Install", "Verify")]
+    [ValidateSet("Download", "Check", "Install", "Verify", "RegisterLocalFiles", "Doctor")]
     [string]$Mode,
 
     [string]$WorkspaceRoot,
@@ -20,9 +20,10 @@ $Script:InitialBoundParameters = $PSBoundParameters
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Script:ScriptVersion = "0.1.0"
+$Script:ScriptVersion = "0.2.0"
 $Script:SchemaVersion = 1
-$Script:Phase = 1
+$Script:Phase = 2
+$Script:SupportedManifestPhases = @(1, 2)
 $Script:Profile = "Research"
 $Script:PythonMajorMinor = "3.11"
 $Script:PythonAbi = "cp311"
@@ -123,28 +124,32 @@ function Reject-UnsupportedPhase2Options {
         }
     }
     if ($unsupported.Count -gt 0) {
-        throw ("这些选项属于第二阶段，当前第一版暂不可用：{0}" -f ($unsupported -join ", "))
+        throw ("这些选项属于后续增强能力，当前版本暂不可用：{0}" -f ($unsupported -join ", "))
     }
 }
 
 function Show-MainMenu {
     Write-Host ""
     Write-Host "Win10 + RTX 3090 深度学习离线环境工具" -ForegroundColor Green
-    Write-Host "第一版只支持固定 Research 环境：Python 3.11 + PyTorch CUDA 12.8"
+    Write-Host "当前版本支持固定 Research 环境：Python 3.11 + PyTorch CUDA 12.8"
     Write-Host ""
     Write-Host "[1] Download  在联网电脑下载离线包"
     Write-Host "[2] Check     检查离线包完整性（只读，不修改文件）"
-    Write-Host "[3] Install   在离线电脑安装环境"
-    Write-Host "[4] Verify    验证 GPU / PyTorch CUDA"
-    Write-Host "[5] Exit      退出"
+    Write-Host "[3] Register  登记你手动放进文件夹的安装包"
+    Write-Host "[4] Install   在离线电脑安装环境"
+    Write-Host "[5] Verify    验证 GPU / PyTorch CUDA"
+    Write-Host "[6] Doctor    诊断当前状态（只读）"
+    Write-Host "[7] Exit      退出"
     Write-Host ""
     $choice = Read-Host "请选择操作"
     switch ($choice) {
         "1" { return "Download" }
         "2" { return "Check" }
-        "3" { return "Install" }
-        "4" { return "Verify" }
-        "5" { return "" }
+        "3" { return "RegisterLocalFiles" }
+        "4" { return "Install" }
+        "5" { return "Verify" }
+        "6" { return "Doctor" }
+        "7" { return "" }
         default { throw "无效选择：$choice" }
     }
 }
@@ -337,22 +342,29 @@ function New-ManifestFileEntry {
         [bool]$Required = $true,
         [string]$Profile = "Research",
         [string]$SourceUrl = "",
-        [string]$Source = "download"
+        [string]$Source = "download",
+        [string]$OptionalComponent = "",
+        [bool]$UserConfirmed = $false,
+        [string]$RegisteredByMode = ""
     )
     $item = Get-Item -LiteralPath $FullPath
     return [ordered]@{
-        component    = $Component
-        group        = $Group
-        kind         = $Kind
-        required     = $Required
-        profile      = $Profile
-        path         = Get-RelativePathFromPackage $item.FullName
-        fileName     = $item.Name
-        size         = [int64]$item.Length
-        sha256       = Get-Sha256 $item.FullName
-        sourceUrl    = $SourceUrl
-        source       = $Source
-        downloadedAt = Get-IsoTimestamp
+        component        = $Component
+        group            = $Group
+        kind             = $Kind
+        required         = $Required
+        profile          = $Profile
+        optionalComponent = $OptionalComponent
+        path             = Get-RelativePathFromPackage $item.FullName
+        fileName         = $item.Name
+        size             = [int64]$item.Length
+        sha256           = Get-Sha256 $item.FullName
+        sourceUrl        = $SourceUrl
+        source           = $Source
+        downloadedAt     = Get-IsoTimestamp
+        registeredAt     = if ($Source -eq "manual") { Get-IsoTimestamp } else { "" }
+        registeredByMode = $RegisteredByMode
+        userConfirmed    = $UserConfirmed
     }
 }
 
@@ -376,12 +388,19 @@ function Test-OfflinePackage {
     if ((Get-PropertyValue $manifest "schemaVersion") -ne $Script:SchemaVersion) {
         Add-CheckError $result "schemaVersion 不匹配，当前脚本只支持 schemaVersion = 1。"
     }
-    if ((Get-PropertyValue $manifest "phase") -ne $Script:Phase) {
-        Add-CheckError $result "phase 不匹配，当前第一版脚本只支持 phase = 1。"
+    $manifestPhase = Get-PropertyValue $manifest "phase"
+    if ($Script:SupportedManifestPhases -notcontains [int]$manifestPhase) {
+        Add-CheckError $result "phase 不匹配，当前脚本只支持 phase = 1 或 phase = 2。"
     }
     $optional = @(Get-PropertyValue $manifest "optionalComponents")
-    if ($optional.Count -ne 0) {
-        Add-CheckError $result "第一阶段不支持可选组件，manifest.optionalComponents 必须为空数组。"
+    if ([int]$manifestPhase -eq 1 -and $optional.Count -ne 0) {
+        Add-CheckError $result "phase 1 离线包不支持可选组件，manifest.optionalComponents 必须为空数组。"
+    }
+    $knownOptionalComponents = @("Git", "CudaToolkit", "VSCode", "Visualization")
+    foreach ($component in $optional) {
+        if ($knownOptionalComponents -notcontains [string]$component) {
+            Add-CheckError $result "未知可选组件：$component"
+        }
     }
     if (-not $AllowIncomplete) {
         if ((Get-PropertyValue $manifest "packageStatus") -ne "complete") {
@@ -939,7 +958,7 @@ function Invoke-VerifyMode {
     $resolvedWorkspace = Resolve-WorkspaceRoot $rootInput
     $statePath = Get-InstallStatePath $resolvedWorkspace
     if (-not (Test-Path -LiteralPath $statePath)) {
-        throw "没有找到安装状态文件：$statePath。Verify 第一版不会回退系统 Python。"
+        throw "没有找到安装状态文件：$statePath。Verify 不会回退系统 Python。"
     }
     $state = Read-JsonFile $statePath
     $venvPython = [string]$state.venvPython
@@ -966,6 +985,115 @@ function Invoke-VerifyMode {
     Invoke-LoggedCommand -FilePath $venvPython -Arguments @("-m", "pip", "check")
     $verifyScript = Join-PackagePath @("scripts", "verify_torch_cuda.py")
     Invoke-LoggedCommand -FilePath $venvPython -Arguments @($verifyScript)
+}
+
+function Write-DoctorLine {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value
+    )
+    Write-Host ("{0,-22} {1}" -f ($Name + ":"), $Value)
+}
+
+function Invoke-DoctorMode {
+    Write-Host ""
+    Write-Host "诊断摘要（只读）" -ForegroundColor Green
+    Write-DoctorLine "脚本版本" $Script:ScriptVersion
+    Write-DoctorLine "离线包目录" $Script:PackageRoot
+    Write-DoctorLine "PowerShell" $PSVersionTable.PSVersion.ToString()
+
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+        Write-DoctorLine "系统" ("{0} / {1}" -f $os.Caption, $os.OSArchitecture)
+    }
+    catch {
+        Write-DoctorLine "系统" "无法读取"
+    }
+
+    try {
+        $drive = Get-DriveInfoForPath $Script:PackageRoot
+        Write-DoctorLine "离线包磁盘" ("{0}, {1} GB free, {2}" -f $drive.Root, $drive.FreeGB, $drive.FileSystem)
+    }
+    catch {
+        Write-DoctorLine "离线包磁盘" "读取失败：$($_.Exception.Message)"
+    }
+
+    $configPath = Get-ConfigPath
+    Write-DoctorLine "config.json" $(if (Test-Path -LiteralPath $configPath) { "存在" } else { "缺失" })
+
+    $manifestPath = Get-ManifestPath
+    if (Test-Path -LiteralPath $manifestPath) {
+        try {
+            $manifest = Read-JsonFile $manifestPath
+            Write-DoctorLine "manifest" ("存在，phase={0}, status={1}" -f (Get-PropertyValue $manifest "phase"), (Get-PropertyValue $manifest "packageStatus"))
+            Write-DoctorLine "manifest files" (@(Get-PropertyValue $manifest "files").Count.ToString())
+            Write-DoctorLine "optional" ((@(Get-PropertyValue $manifest "optionalComponents") -join ", "))
+        }
+        catch {
+            Write-DoctorLine "manifest" "无法解析：$($_.Exception.Message)"
+        }
+        $check = Test-OfflinePackage
+        Write-DoctorLine "Check 错误数" $check.Errors.Count.ToString()
+        Write-DoctorLine "Check 警告数" $check.Warnings.Count.ToString()
+        foreach ($errorMessage in $check.Errors | Select-Object -First 5) {
+            Write-Fail $errorMessage
+        }
+    }
+    else {
+        Write-DoctorLine "manifest" "缺失"
+    }
+
+    $pythonCmd = Get-CommandPath "python"
+    Write-DoctorLine "python 命令" $(if ($null -eq $pythonCmd) { "未找到" } else { $pythonCmd })
+    $pyLauncher = Get-CommandPath "py"
+    Write-DoctorLine "py launcher" $(if ($null -eq $pyLauncher) { "未找到" } else { $pyLauncher })
+    $py311 = Find-Python311
+    if ($null -eq $py311) {
+        Write-DoctorLine "Python 3.11 x64" "未找到，或 pip/venv 不可用"
+    }
+    else {
+        Write-DoctorLine "Python 3.11 x64" $py311.Path
+    }
+
+    Write-DoctorLine "VC++ Runtime" $(if (Test-VcRuntimeHeuristic) { "可能已安装" } else { "未检测完整，请安装 VC_redist.x64.exe" })
+
+    $nvidiaSmi = Get-NvidiaSmiPath
+    if ($null -eq $nvidiaSmi) {
+        Write-DoctorLine "nvidia-smi" "未找到"
+    }
+    else {
+        Write-DoctorLine "nvidia-smi" $nvidiaSmi
+        $gpuNames = Get-NvidiaGpuNames
+        Write-DoctorLine "NVIDIA GPU" $(if ($gpuNames.Count -eq 0) { "未检测到" } else { $gpuNames -join "; " })
+    }
+
+    $rootInput = $WorkspaceRoot
+    if (-not [string]::IsNullOrWhiteSpace($rootInput)) {
+        $resolvedWorkspace = Resolve-WorkspaceRoot $rootInput
+        Write-DoctorLine "工作区" $resolvedWorkspace
+        $statePath = Get-InstallStatePath $resolvedWorkspace
+        if (Test-Path -LiteralPath $statePath) {
+            try {
+                $state = Read-JsonFile $statePath
+                Write-DoctorLine "install_state" ("存在，status={0}" -f (Get-PropertyValue $state "installStatus"))
+                Write-DoctorLine "venvPython" ([string](Get-PropertyValue $state "venvPython"))
+                $venvPython = [string](Get-PropertyValue $state "venvPython")
+                if (-not [string]::IsNullOrWhiteSpace($venvPython)) {
+                    $venvRoot = Split-Path -Parent (Split-Path -Parent $venvPython)
+                    Write-DoctorLine ".offline_dl_ready" $(if (Test-Path -LiteralPath (Join-Path $venvRoot ".offline_dl_ready")) { "存在" } else { "缺失" })
+                }
+            }
+            catch {
+                Write-DoctorLine "install_state" "无法解析：$($_.Exception.Message)"
+            }
+        }
+        else {
+            Write-DoctorLine "install_state" "缺失"
+        }
+    }
+    else {
+        Write-DoctorLine "工作区" "未指定；如需诊断安装状态，请加 -WorkspaceRoot D:\AI"
+    }
 }
 
 function Enable-Tls12 {
@@ -1324,6 +1452,269 @@ function Build-ManifestFromFiles {
     }
 }
 
+function Set-JsonProperty {
+    param(
+        [Parameter(Mandatory = $true)]$Object,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][AllowNull()]$Value
+    )
+    if ($null -eq $Object.PSObject.Properties[$Name]) {
+        $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+    else {
+        $Object.$Name = $Value
+    }
+}
+
+function New-BaseManifest {
+    $torchLock = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
+    $researchLock = Join-PackagePath @("requirements", "research.lock.txt")
+    $verifyScript = Join-PackagePath @("scripts", "verify_torch_cuda.py")
+
+    $lockFiles = New-Object 'System.Collections.Generic.List[object]'
+    $files = New-Object 'System.Collections.Generic.List[object]'
+    if (Test-Path -LiteralPath $torchLock) {
+        $lockFiles.Add([ordered]@{
+                name    = "torch-cu128.lock.txt"
+                path    = "requirements\torch-cu128.lock.txt"
+                sha256  = Get-Sha256 $torchLock
+                profile = "Research"
+            }) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $torchLock -Component "torch-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
+    }
+    if (Test-Path -LiteralPath $researchLock) {
+        $lockFiles.Add([ordered]@{
+                name    = "research.lock.txt"
+                path    = "requirements\research.lock.txt"
+                sha256  = Get-Sha256 $researchLock
+                profile = "Research"
+            }) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $researchLock -Component "research-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
+    }
+    if (Test-Path -LiteralPath $verifyScript) {
+        $files.Add((New-ManifestFileEntry -FullPath $verifyScript -Component "verify-script" -Group "script" -Kind "script" -Source "local")) | Out-Null
+    }
+
+    return [pscustomobject][ordered]@{
+        schemaVersion          = $Script:SchemaVersion
+        phase                  = $Script:Phase
+        packageStatus          = "incomplete"
+        createdAt              = Get-IsoTimestamp
+        createdByScriptVersion = $Script:ScriptVersion
+        profile                = $Script:Profile
+        optionalComponents     = @()
+        pythonMajorMinor       = $Script:PythonMajorMinor
+        pythonAbi              = $Script:PythonAbi
+        platform               = $Script:Platform
+        torchCudaTag           = $Script:TorchCudaTag
+        toolchain              = [ordered]@{
+            downloadPython = ""
+            pip            = ""
+            setuptools     = ""
+            wheel          = ""
+        }
+        downloadCommands       = @()
+        lockFiles              = $lockFiles.ToArray()
+        files                  = $files.ToArray()
+    }
+}
+
+function Read-OrCreateManifest {
+    $manifestPath = Get-ManifestPath
+    if (Test-Path -LiteralPath $manifestPath) {
+        return Read-JsonFile $manifestPath
+    }
+    return New-BaseManifest
+}
+
+function Add-ManifestFileEntries {
+    param(
+        [Parameter(Mandatory = $true)]$Manifest,
+        [Parameter(Mandatory = $true)]$Entries
+    )
+    $existing = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($entry in @(Get-PropertyValue $Manifest "files")) {
+        $existing.Add($entry) | Out-Null
+    }
+
+    foreach ($newEntry in @($Entries)) {
+        $kept = New-Object 'System.Collections.Generic.List[object]'
+        foreach ($oldEntry in $existing) {
+            if ([string]$oldEntry.path -ne [string]$newEntry.path) {
+                $kept.Add($oldEntry) | Out-Null
+            }
+        }
+        $kept.Add($newEntry) | Out-Null
+        $existing = $kept
+    }
+    Set-JsonProperty -Object $Manifest -Name "files" -Value ($existing.ToArray())
+}
+
+function Add-ManifestOptionalComponents {
+    param(
+        [Parameter(Mandatory = $true)]$Manifest,
+        [string[]]$Components
+    )
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($component in @(Get-PropertyValue $Manifest "optionalComponents")) {
+        if (-not [string]::IsNullOrWhiteSpace($component)) {
+            $null = $set.Add([string]$component)
+        }
+    }
+    foreach ($component in $Components) {
+        if (-not [string]::IsNullOrWhiteSpace($component)) {
+            $null = $set.Add($component)
+        }
+    }
+    Set-JsonProperty -Object $Manifest -Name "optionalComponents" -Value (@($set | Sort-Object))
+}
+
+function Test-ManualInstallerFile {
+    param(
+        [Parameter(Mandatory = $true)][System.IO.FileInfo]$File,
+        [Parameter(Mandatory = $true)][string]$Kind
+    )
+    $name = $File.Name.ToLowerInvariant()
+    $sizeMB = [math]::Round($File.Length / 1MB, 1)
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+
+    if ($File.Extension.ToLowerInvariant() -ne ".exe") {
+        return [pscustomobject]@{ Accept = $false; Warnings = @("不是 exe 安装包：$($File.Name)") }
+    }
+
+    switch ($Kind) {
+        "nvidia-driver" {
+            if ($name -notmatch "nvidia|geforce|studio|game") {
+                $warnings.Add("驱动文件名没有明显 NVIDIA / GeForce / Studio 关键词：$($File.Name)") | Out-Null
+            }
+            if ($File.Length -lt 100MB) {
+                $warnings.Add("NVIDIA 驱动文件体积偏小（$sizeMB MB），请确认不是网页下载器。") | Out-Null
+            }
+        }
+        "cuda-toolkit" {
+            if ($File.Length -lt 500MB) {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("CUDA Toolkit 文件体积偏小（$sizeMB MB），很可能是 network installer，离线包拒绝登记：$($File.Name)") }
+            }
+            if ($name -notmatch "cuda|toolkit") {
+                $warnings.Add("CUDA Toolkit 文件名没有明显 cuda/toolkit 关键词：$($File.Name)") | Out-Null
+            }
+        }
+        "git" {
+            if ($name -notmatch "git") {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("Git 安装包文件名应包含 Git：$($File.Name)") }
+            }
+            if ($name -notmatch "64|x64") {
+                $warnings.Add("Git 安装包文件名没有明显 64/x64 标记，请确认是 64 位版本。") | Out-Null
+            }
+        }
+        "vscode" {
+            if ($name -notmatch "code|vscode|visualstudiocode") {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("VS Code 安装包文件名不明确：$($File.Name)") }
+            }
+        }
+    }
+    return [pscustomobject]@{ Accept = $true; Warnings = $warnings.ToArray() }
+}
+
+function Get-RegisterLocalFileEntries {
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $optionalComponents = New-Object 'System.Collections.Generic.List[string]'
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+
+    $driverDir = Join-PackagePath @("downloads", "drivers")
+    foreach ($file in Get-ChildItem -LiteralPath $driverDir -File -Filter "*.exe" -ErrorAction SilentlyContinue) {
+        $check = Test-ManualInstallerFile -File $file -Kind "nvidia-driver"
+        foreach ($warning in $check.Warnings) { $warnings.Add($warning) | Out-Null }
+        if ($check.Accept) {
+            $entries.Add((New-ManifestFileEntry -FullPath $file.FullName -Component "nvidia-driver" -Group "driver" -Kind "installer" -Required $true -Source "manual" -UserConfirmed $true -RegisteredByMode "RegisterLocalFiles")) | Out-Null
+        }
+    }
+
+    $cudaDir = Join-PackagePath @("downloads", "cuda_optional")
+    foreach ($file in Get-ChildItem -LiteralPath $cudaDir -File -Filter "*.exe" -ErrorAction SilentlyContinue) {
+        $check = Test-ManualInstallerFile -File $file -Kind "cuda-toolkit"
+        foreach ($warning in $check.Warnings) { $warnings.Add($warning) | Out-Null }
+        if ($check.Accept) {
+            $entries.Add((New-ManifestFileEntry -FullPath $file.FullName -Component "cuda-toolkit" -Group "cuda_optional" -Kind "installer" -Required $false -Source "manual" -OptionalComponent "CudaToolkit" -UserConfirmed $true -RegisteredByMode "RegisterLocalFiles")) | Out-Null
+            $optionalComponents.Add("CudaToolkit") | Out-Null
+        }
+    }
+
+    $toolsDir = Join-PackagePath @("downloads", "tools_optional")
+    foreach ($file in Get-ChildItem -LiteralPath $toolsDir -File -Filter "*.exe" -ErrorAction SilentlyContinue) {
+        $name = $file.Name.ToLowerInvariant()
+        if ($name -match "git") {
+            $check = Test-ManualInstallerFile -File $file -Kind "git"
+            foreach ($warning in $check.Warnings) { $warnings.Add($warning) | Out-Null }
+            if ($check.Accept) {
+                $entries.Add((New-ManifestFileEntry -FullPath $file.FullName -Component "git" -Group "tools_optional" -Kind "installer" -Required $false -Source "manual" -OptionalComponent "Git" -UserConfirmed $true -RegisteredByMode "RegisterLocalFiles")) | Out-Null
+                $optionalComponents.Add("Git") | Out-Null
+            }
+        }
+        elseif ($name -match "code|vscode|visualstudiocode") {
+            $check = Test-ManualInstallerFile -File $file -Kind "vscode"
+            foreach ($warning in $check.Warnings) { $warnings.Add($warning) | Out-Null }
+            if ($check.Accept) {
+                $entries.Add((New-ManifestFileEntry -FullPath $file.FullName -Component "vscode" -Group "tools_optional" -Kind "installer" -Required $false -Source "manual" -OptionalComponent "VSCode" -UserConfirmed $true -RegisteredByMode "RegisterLocalFiles")) | Out-Null
+                $optionalComponents.Add("VSCode") | Out-Null
+            }
+        }
+        else {
+            $warnings.Add("tools_optional 中存在未识别 exe，已跳过：$($file.Name)") | Out-Null
+        }
+    }
+
+    return [pscustomobject]@{
+        Entries            = $entries.ToArray()
+        OptionalComponents = $optionalComponents.ToArray()
+        Warnings           = $warnings.ToArray()
+    }
+}
+
+function Invoke-RegisterLocalFilesMode {
+    Write-Info "开始登记本地手动放入的安装包。此模式会原子更新 manifest；普通 Check 仍然只读。"
+    $scan = Get-RegisterLocalFileEntries
+    foreach ($warning in $scan.Warnings) {
+        Write-Warn $warning
+    }
+    if (@($scan.Entries).Count -eq 0) {
+        throw "没有发现可登记的本地文件。请把 NVIDIA 驱动放入 downloads\drivers，或把 CUDA/Git/VS Code 安装包放入对应 optional 目录。"
+    }
+
+    Write-Host ""
+    Write-Host "将登记以下文件：" -ForegroundColor Green
+    foreach ($entry in @($scan.Entries)) {
+        Write-Host ("- {0} ({1}, {2})" -f $entry.path, $entry.component, $(if ($entry.required) { "必需" } else { "可选" }))
+    }
+    Confirm-Continue "确认登记这些文件吗？" "y" | Out-Null
+
+    $manifest = Read-OrCreateManifest
+    Set-JsonProperty -Object $manifest -Name "schemaVersion" -Value $Script:SchemaVersion
+    Set-JsonProperty -Object $manifest -Name "phase" -Value $Script:Phase
+    Set-JsonProperty -Object $manifest -Name "createdByScriptVersion" -Value $Script:ScriptVersion
+    Add-ManifestFileEntries -Manifest $manifest -Entries $scan.Entries
+    Add-ManifestOptionalComponents -Manifest $manifest -Components $scan.OptionalComponents
+    Set-JsonProperty -Object $manifest -Name "packageStatus" -Value "incomplete"
+
+    $manifestPath = Get-ManifestPath
+    Write-JsonAtomic $manifest $manifestPath
+
+    $strictCheck = Test-OfflinePackage
+    if ($strictCheck.Errors.Count -eq 0) {
+        Set-JsonProperty -Object $manifest -Name "packageStatus" -Value "complete"
+        Write-JsonAtomic $manifest $manifestPath
+        Write-Ok "登记完成，离线包当前已完整。"
+    }
+    else {
+        Set-JsonProperty -Object $manifest -Name "packageStatus" -Value "incomplete"
+        Write-JsonAtomic $manifest $manifestPath
+        Write-Warn "登记完成，但离线包还不完整。后续请继续运行 Download 或补齐缺失文件，再运行 Check。"
+        foreach ($errorMessage in $strictCheck.Errors) {
+            Write-Warn $errorMessage
+        }
+    }
+}
+
 function Invoke-DownloadMode {
     Write-Host ""
     Write-Warn "下载内容会保存到当前脚本所在文件夹：$Script:PackageRoot"
@@ -1409,8 +1800,10 @@ function Invoke-Main {
     switch ($Mode) {
         "Download" { Invoke-DownloadMode }
         "Check" { Invoke-CheckMode }
+        "RegisterLocalFiles" { Invoke-RegisterLocalFilesMode }
         "Install" { Invoke-InstallMode }
         "Verify" { Invoke-VerifyMode }
+        "Doctor" { Invoke-DoctorMode }
         default { throw "未知模式：$Mode" }
     }
     return 0

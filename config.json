@@ -35,13 +35,12 @@
       "manualInstruction": "NVIDIA 驱动直链经常变化。请从 NVIDIA 官方驱动页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放入 downloads\\drivers；或把固定直链写入本字段。"
     }
   },
-  "firstPhaseUnsupported": [
+  "unsupportedInCurrentVersion": [
     "Profile",
     "ReuseVenv",
-    "Git",
-    "CudaToolkit",
     "Visualization",
-    "RegisterLocalFiles",
-    "Doctor"
+    "AutoInstallGit",
+    "AutoInstallCudaToolkit",
+    "AutoInstallVSCode"
   ]
 }

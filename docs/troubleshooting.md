@@ -50,4 +50,30 @@ win_amd64
 - 安装了 CPU 版 PyTorch。
 - CUDA wheel 不是 cu128。
 
-第一版 Verify 会检查 `torch.version.cuda`，并运行 1024x1024 CUDA 矩阵乘法。
+Verify 会检查 `torch.version.cuda`，并运行 1024x1024 CUDA 矩阵乘法。
+
+## RegisterLocalFiles 没有发现文件
+
+请确认文件放在正确目录：
+
+```text
+downloads\drivers          NVIDIA 驱动 exe
+downloads\cuda_optional    CUDA Toolkit local installer
+downloads\tools_optional   Git / VS Code 安装包
+```
+
+登记只会写入 manifest，不会自动安装这些程序。
+
+## 不知道哪里出问题
+
+先运行只读诊断：
+
+```powershell
+.\OfflineDL-Win10-3090.ps1 -Mode Doctor
+```
+
+如果要诊断安装后的工作区：
+
+```powershell
+.\OfflineDL-Win10-3090.ps1 -Mode Doctor -WorkspaceRoot D:\AI
+```
