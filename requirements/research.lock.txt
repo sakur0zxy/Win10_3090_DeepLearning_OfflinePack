@@ -1,0 +1,20 @@
+# Phase 1 fixed Research top-level lock.
+# All top-level packages are pinned. Download records resolved wheels in manifest.files.
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.2.3
+scikit-learn==1.6.1
+matplotlib==3.10.3
+jupyterlab==4.4.2
+notebook==7.4.2
+ipykernel==6.29.5
+pillow==11.2.1
+tqdm==4.67.1
+opencv-python==4.11.0.86
+tensorboard==2.19.0
+transformers==4.52.4
+datasets==3.6.0
+accelerate==1.7.0
+safetensors==0.5.3
+einops==0.8.1
+sentencepiece==0.2.0

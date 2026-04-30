@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "phase": 1,
+  "target": {
+    "os": "Windows 10 x64",
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "pythonMajorMinor": "3.11",
+    "pythonInstallerVersion": "3.11.9",
+    "pythonAbi": "cp311",
+    "platform": "win_amd64",
+    "torchCudaTag": "cu128",
+    "profile": "Research"
+  },
+  "space": {
+    "downloadMinFreeGB": 50,
+    "workspaceMinFreeGB": 50
+  },
+  "components": {
+    "python": {
+      "required": true,
+      "version": "3.11.9",
+      "arch": "x64",
+      "fileName": "python-3.11.9-amd64.exe",
+      "url": "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe"
+    },
+    "vcRuntime": {
+      "required": true,
+      "fileName": "VC_redist.x64.exe",
+      "url": "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+    },
+    "nvidiaDriver": {
+      "required": true,
+      "fileName": "",
+      "url": "",
+      "manualInstruction": "NVIDIA 驱动直链经常变化。请从 NVIDIA 官方驱动页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放入 downloads\\drivers；或把固定直链写入本字段。"
+    }
+  },
+  "firstPhaseUnsupported": [
+    "Profile",
+    "ReuseVenv",
+    "Git",
+    "CudaToolkit",
+    "Visualization",
+    "RegisterLocalFiles",
+    "Doctor"
+  ]
+}

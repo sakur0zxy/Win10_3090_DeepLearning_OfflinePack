@@ -1,0 +1,29 @@
+# Generated package state
+manifest.json
+*.tmp
+*.part
+_test_no_state/
+
+# Runtime logs
+logs/*
+!logs/.gitkeep
+
+# Downloaded installers and wheels are large and machine/package specific.
+downloads/**
+!downloads/
+!downloads/**/
+!downloads/**/.gitkeep
+wheels/**
+!wheels/
+!wheels/**/
+!wheels/**/.gitkeep
+
+# Local planning backups
+backups/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# pip staging
+_staging/

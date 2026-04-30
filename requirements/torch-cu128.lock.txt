@@ -1,0 +1,5 @@
+# Phase 1 fixed PyTorch CUDA 12.8 top-level lock.
+# Keep this file small in phase 1; manifest.files records the resolved wheel set.
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
+torchaudio==2.11.0+cu128

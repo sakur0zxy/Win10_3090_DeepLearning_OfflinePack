@@ -1,0 +1,53 @@
+# 排错指南
+
+## running scripts is disabled on this system
+
+用 bat 入口运行：
+
+```text
+OfflineDL-Win10-3090.bat
+```
+
+或者在 PowerShell 里运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
+```
+
+## nvidia-smi not found
+
+说明 NVIDIA 驱动未安装或未重启。请手动运行 `downloads\drivers` 里的驱动安装包，安装完成后重启电脑。
+
+## DLL load failed
+
+通常是 VC++ Runtime 缺失或不完整。请手动运行：
+
+```text
+downloads\runtime\VC_redist.x64.exe
+```
+
+## No matching distribution found
+
+通常是 wheel 与目标 Python / 平台不匹配。第一版目标固定为：
+
+```text
+Python 3.11
+cp311
+win_amd64
+```
+
+请重新在联网电脑运行 `Download`，不要手动替换 wheels。
+
+## pip check failed
+
+说明依赖版本有冲突或缺失。请保留 `logs` 目录里的日志，重新运行 `Check`，确认离线包完整。
+
+## torch.cuda.is_available() == False
+
+常见原因：
+
+- NVIDIA 驱动未安装或太旧。
+- 安装了 CPU 版 PyTorch。
+- CUDA wheel 不是 cu128。
+
+第一版 Verify 会检查 `torch.version.cuda`，并运行 1024x1024 CUDA 矩阵乘法。
