@@ -1,84 +1,102 @@
 # Win10 + RTX 3090 深度学习离线环境工具
 
-这个离线包用于在另一台 Windows 10 x64 + RTX 3090 电脑上安装深度学习环境：
+这个离线包用于在另一台 Windows 10 x64 + RTX 3090 电脑上安装深度学习环境。
+
+默认技术栈：
 
 - Python 3.11 x64
 - PyTorch CUDA 12.8
-- Research 常用科研包
-- 干净虚拟环境 `dl-py311-cu128`
+- 可选择 `Minimal` / `Research` / `Full` 档位
+- 可选 Visualization 增强包
+- 可选登记 Git / CUDA Toolkit / VS Code 安装包
 
-当前版本支持 `Download / Check / RegisterLocalFiles / Install / Verify / Doctor`。
+## 推荐流程
 
-当前版本仍不支持：`Visualization / ReuseVenv / 多 Profile`，也不会自动安装 Git、CUDA Toolkit、VS Code。`RegisterLocalFiles` 只负责把你手动放入文件夹的安装包登记进 `manifest.json`。
-
-## 联网电脑推荐流程
+联网电脑：
 
 1. 双击 `OfflineDL-Win10-3090.bat`。
-2. 选择 `Download`，按提示输入 `y` 确认下载到当前脚本所在文件夹。
-3. 如果提示缺少 NVIDIA 驱动，请从 NVIDIA 官方驱动页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放到 `downloads\drivers`。
-4. 可选择运行 `RegisterLocalFiles`，把手动放入的驱动登记进 `manifest.json`。
-5. 再运行 `Download`。
-6. 下载完成后选择 `Check`。
-7. Check 通过后，把整个 `Win10_3090_DeepLearning_OfflinePack` 文件夹拷贝到离线电脑。
+2. 选择 `Download`。
+3. 选择档位：`Minimal`、`Research` 或 `Full`。
+4. 按提示决定是否加入 Visualization、Git、CUDA Toolkit、VS Code。
+5. 如果提示缺少 NVIDIA 驱动，请从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放到 `downloads\drivers`。
+6. 下载完成后运行 `Check`。
+7. Check 通过后，拷贝整个 `Win10_3090_DeepLearning_OfflinePack` 文件夹到离线电脑。
+
+离线电脑：
+
+1. 先运行 `Check`，确认离线包没有损坏。
+2. 按提示手动安装 NVIDIA 驱动、Python、VC++ Runtime。
+3. 驱动安装后重启电脑。
+4. 运行 `Install`，输入 AI 工作区路径，例如 `D:\AI`。
+5. 安装完成后运行 `Verify`。
 
 请拷贝整个文件夹，不要只拷贝 `wheels` 或 `downloads`。`manifest.json`、`requirements`、`scripts`、`logs` 都是校验和安装需要的。
 
-## 离线电脑推荐流程
+## 入口
 
-1. 双击 `OfflineDL-Win10-3090.bat`。
-2. 先选择 `Check`，确认离线包没有损坏。
-3. 按提示手动安装 NVIDIA 驱动、Python、VC++ Runtime。
-4. 驱动安装后请重启电脑。
-5. 再选择 `Install`，输入 AI 工作区路径，例如 `D:\AI`。
-6. 安装完成后选择 `Verify`。
-
-本脚本不会自动静默安装 NVIDIA 驱动、Python 安装包、VC++ Runtime。第一次安装时请按提示手动运行对应安装包。
-
-## PowerShell 运行方式
-
-如果双击 `.ps1` 被系统阻止，可以使用：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
-```
-
-也可以直接双击：
+双击入口：
 
 ```text
 OfflineDL-Win10-3090.bat
 ```
 
-## 命令行示例
+PowerShell 入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
+```
+
+常用命令：
 
 ```powershell
 .\OfflineDL-Win10-3090.ps1 -Mode Download
+.\OfflineDL-Win10-3090.ps1 -Mode Download -Profile Minimal
+.\OfflineDL-Win10-3090.ps1 -Mode Download -Profile Research -IncludeVisualization
+.\OfflineDL-Win10-3090.ps1 -Mode Download -Profile Full
 .\OfflineDL-Win10-3090.ps1 -Mode Check
 .\OfflineDL-Win10-3090.ps1 -Mode RegisterLocalFiles
 .\OfflineDL-Win10-3090.ps1 -Mode Install -WorkspaceRoot D:\AI
+.\OfflineDL-Win10-3090.ps1 -Mode Install -WorkspaceRoot D:\AI -ReuseVenv
 .\OfflineDL-Win10-3090.ps1 -Mode Verify -WorkspaceRoot D:\AI
 .\OfflineDL-Win10-3090.ps1 -Mode Doctor -WorkspaceRoot D:\AI
 ```
 
-当前版本不支持 `-Profile`、`-ReuseVenv`、`-IncludeGit`、`-IncludeCudaToolkit`、`-IncludeVisualization`。传入这些参数会直接提示暂不可用。
+## 档位说明
 
-## 手动登记文件
+- `Minimal`：最小运行环境，适合只跑基础 PyTorch / numpy / pandas / scipy。
+- `Research`：默认科研环境，包含 Jupyter、scikit-learn、matplotlib、OpenCV、transformers 等。
+- `Full`：Research + Git / CUDA Toolkit 安装包登记。不会自动静默安装这些工具。
+- `Visualization`：独立可选项，包含 seaborn、plotly、ipywidgets、mlflow。
 
-`RegisterLocalFiles` 会扫描：
+## 手动安装包
+
+脚本不会自动静默安装 NVIDIA 驱动、Python、VC++ Runtime、Git、CUDA Toolkit、VS Code。它只负责下载、登记、校验和离线安装 Python wheel。
+
+手动文件放置位置：
 
 ```text
 downloads\drivers          NVIDIA 驱动安装包
-downloads\cuda_optional    CUDA Toolkit local installer，可选登记
-downloads\tools_optional   Git / VS Code 安装包，可选登记
+downloads\cuda_optional    CUDA Toolkit local installer
+downloads\tools_optional   Git / VS Code 安装包
 ```
 
-注意：登记不等于安装。Git、CUDA Toolkit、VS Code 仍需要你按需手动安装。
+CUDA Toolkit 必须是离线完整安装包，不接受小体积 network installer。
+
+## ReuseVenv
+
+默认安装策略是干净环境。如果目标虚拟环境已经存在：
+
+- 不传 `-ReuseVenv`：脚本会要求删除并重建。
+- 传 `-ReuseVenv`：脚本会先检查 Python 版本、64 位、pip、已有 PyTorch CUDA 版本。
+- 如果检测到 CPU 版 PyTorch、CUDA 版本不匹配、torch 无法导入，脚本会停止并建议使用 `-RecreateVenv`。
 
 ## 路径建议
 
-- 离线包会保存到当前脚本所在文件夹。
+- 下载文件会保存到当前脚本所在文件夹。
+- 如果要把离线包放到移动硬盘，请先移动整个脚本文件夹，再运行 Download。
 - AI 工作区建议使用 `D:\AI` 或 `E:\AI`。
 - 工作区路径尽量不要带空格或特殊字符。
-- 如果只在 Windows 间使用移动硬盘，推荐 NTFS；需要跨平台交换再考虑 exFAT；不要用 FAT32。
+- Windows 间使用移动硬盘推荐 NTFS；需要跨平台交换再考虑 exFAT；不要用 FAT32。
 
 ## 日志
 

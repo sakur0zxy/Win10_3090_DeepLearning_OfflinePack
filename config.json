@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "phase": 1,
+  "phase": 2,
   "target": {
     "os": "Windows 10 x64",
     "gpu": "NVIDIA GeForce RTX 3090",
@@ -9,7 +9,9 @@
     "pythonAbi": "cp311",
     "platform": "win_amd64",
     "torchCudaTag": "cu128",
-    "profile": "Research"
+    "profile": "Research",
+    "supportedProfiles": ["Minimal", "Research", "Full"],
+    "optionalComponents": ["Visualization", "Git", "CudaToolkit", "VSCode"]
   },
   "space": {
     "downloadMinFreeGB": 50,
@@ -35,12 +37,14 @@
       "manualInstruction": "NVIDIA 驱动直链经常变化。请从 NVIDIA 官方驱动页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放入 downloads\\drivers；或把固定直链写入本字段。"
     }
   },
-  "unsupportedInCurrentVersion": [
+  "supportedInCurrentVersion": [
     "Profile",
     "ReuseVenv",
     "Visualization",
-    "AutoInstallGit",
-    "AutoInstallCudaToolkit",
-    "AutoInstallVSCode"
+    "RegisterLocalFiles",
+    "Doctor",
+    "ManualGitInstallerRegistration",
+    "ManualCudaToolkitInstallerRegistration",
+    "ManualVSCodeInstallerRegistration"
   ]
 }

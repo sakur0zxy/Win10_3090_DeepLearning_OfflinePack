@@ -9,22 +9,25 @@ param(
     [switch]$Force,
     [switch]$RecreateVenv,
 
+    [ValidateSet("Minimal", "Research", "Full")]
     [string]$Profile,
     [switch]$ReuseVenv,
     [switch]$IncludeGit,
     [switch]$IncludeCudaToolkit,
-    [switch]$IncludeVisualization
+    [switch]$IncludeVisualization,
+    [switch]$IncludeVSCode
 )
 
 $Script:InitialBoundParameters = $PSBoundParameters
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Script:ScriptVersion = "0.2.0"
+$Script:ScriptVersion = "0.3.0"
 $Script:SchemaVersion = 1
 $Script:Phase = 2
 $Script:SupportedManifestPhases = @(1, 2)
 $Script:Profile = "Research"
+$Script:EffectiveProfile = "Research"
 $Script:PythonMajorMinor = "3.11"
 $Script:PythonAbi = "cp311"
 $Script:Platform = "win_amd64"
@@ -116,22 +119,126 @@ function Confirm-Continue {
     return $true
 }
 
-function Reject-UnsupportedPhase2Options {
-    $unsupported = @()
-    foreach ($name in @("Profile", "ReuseVenv", "IncludeGit", "IncludeCudaToolkit", "IncludeVisualization")) {
-        if ($Script:InitialBoundParameters.ContainsKey($name)) {
-            $unsupported += "-$name"
+function Assert-ParameterCombination {
+    if ($ReuseVenv -and $RecreateVenv) {
+        throw "-ReuseVenv 和 -RecreateVenv 不能同时使用。请选择复用或重建其中一种。"
+    }
+    $modeForParams = if ([string]::IsNullOrWhiteSpace($Mode)) { "" } else { $Mode }
+    foreach ($name in @("ReuseVenv", "RecreateVenv")) {
+        if ($Script:InitialBoundParameters.ContainsKey($name) -and $modeForParams -notin @("", "Install")) {
+            throw "-$name 只在 Install 模式中使用。"
         }
     }
-    if ($unsupported.Count -gt 0) {
-        throw ("这些选项属于后续增强能力，当前版本暂不可用：{0}" -f ($unsupported -join ", "))
+    foreach ($name in @("IncludeGit", "IncludeCudaToolkit", "IncludeVisualization", "IncludeVSCode")) {
+        if ($Script:InitialBoundParameters.ContainsKey($name) -and $modeForParams -notin @("", "Download")) {
+            throw "-$name 只在 Download 模式中使用。Install 会严格按照 manifest.json 中记录的内容安装。"
+        }
     }
+    if ($Script:InitialBoundParameters.ContainsKey("Profile") -and $modeForParams -notin @("", "Download")) {
+        throw "-Profile 只在 Download 模式中使用。Install / Check / Verify 会读取 manifest 或 install_state。"
+    }
+}
+
+function Resolve-EffectiveProfile {
+    if ($Script:InitialBoundParameters.ContainsKey("Profile")) {
+        $selectedProfile = [string]$Script:InitialBoundParameters["Profile"]
+        if (-not [string]::IsNullOrWhiteSpace($selectedProfile)) {
+            $Script:EffectiveProfile = $selectedProfile
+            $Script:Profile = $selectedProfile
+            return $selectedProfile
+        }
+    }
+    if ($Mode -eq "Download" -and -not $NonInteractive -and -not $Yes) {
+        Write-Host ""
+        Write-Host "请选择离线包档位" -ForegroundColor Green
+        Write-Host "[1] Minimal   最小运行环境"
+        Write-Host "[2] Research  科研常用环境（推荐）"
+        Write-Host "[3] Full      Research + Git/CUDA Toolkit 安装包登记"
+        $choice = Read-Host "直接回车默认 Research"
+        switch ($choice) {
+            "1" { $Script:EffectiveProfile = "Minimal" }
+            "3" { $Script:EffectiveProfile = "Full" }
+            default { $Script:EffectiveProfile = "Research" }
+        }
+    }
+    else {
+        $Script:EffectiveProfile = "Research"
+    }
+    $Script:Profile = $Script:EffectiveProfile
+    return $Script:EffectiveProfile
+}
+
+function Get-SelectedOptionalComponents {
+    param([Parameter(Mandatory = $true)][string]$ProfileName)
+    $set = New-Object 'System.Collections.Generic.HashSet[string]'
+    if ($ProfileName -eq "Full") {
+        $null = $set.Add("Git")
+        $null = $set.Add("CudaToolkit")
+    }
+    if ($IncludeGit) { $null = $set.Add("Git") }
+    if ($IncludeCudaToolkit) { $null = $set.Add("CudaToolkit") }
+    if ($IncludeVSCode) { $null = $set.Add("VSCode") }
+    if ($IncludeVisualization) { $null = $set.Add("Visualization") }
+    if ($Mode -eq "Download" -and -not $NonInteractive -and -not $Yes) {
+        $visualAnswer = Read-Host "是否加入可视化增强包（seaborn/plotly/ipywidgets/mlflow）？输入 y 加入，直接回车跳过"
+        if ($visualAnswer -eq "y") { $null = $set.Add("Visualization") }
+        if ($ProfileName -ne "Full") {
+            $gitAnswer = Read-Host "是否登记 Git 安装包？需要你先把 Git exe 放到 downloads\tools_optional。输入 y 加入，直接回车跳过"
+            if ($gitAnswer -eq "y") { $null = $set.Add("Git") }
+            $cudaAnswer = Read-Host "是否登记 CUDA Toolkit 离线安装包？需要你先把 local installer 放到 downloads\cuda_optional。输入 y 加入，直接回车跳过"
+            if ($cudaAnswer -eq "y") { $null = $set.Add("CudaToolkit") }
+        }
+        $vscodeAnswer = Read-Host "是否登记 VS Code 安装包？需要你先把 VS Code exe 放到 downloads\tools_optional。输入 y 加入，直接回车跳过"
+        if ($vscodeAnswer -eq "y") { $null = $set.Add("VSCode") }
+    }
+    return @($set | Sort-Object)
+}
+
+function Get-LockSelection {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProfileName,
+        [string[]]$OptionalComponents = @()
+    )
+    $locks = New-Object 'System.Collections.Generic.List[object]'
+    $locks.Add([pscustomobject]@{
+            Name      = "torch-cu128.lock.txt"
+            Path      = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
+            Component = "torch-lock"
+            Profile   = $ProfileName
+            Group     = "pytorch"
+        }) | Out-Null
+    $locks.Add([pscustomobject]@{
+            Name      = "minimal.lock.txt"
+            Path      = Join-PackagePath @("requirements", "minimal.lock.txt")
+            Component = "minimal-lock"
+            Profile   = "Minimal"
+            Group     = "minimal"
+        }) | Out-Null
+    if ($ProfileName -in @("Research", "Full")) {
+        $locks.Add([pscustomobject]@{
+                Name      = "research.lock.txt"
+                Path      = Join-PackagePath @("requirements", "research.lock.txt")
+                Component = "research-lock"
+                Profile   = "Research"
+                Group     = "research"
+            }) | Out-Null
+    }
+    if ($OptionalComponents -contains "Visualization") {
+        $locks.Add([pscustomobject]@{
+                Name      = "visualization.lock.txt"
+                Path      = Join-PackagePath @("requirements", "visualization.lock.txt")
+                Component = "visualization-lock"
+                Profile   = $ProfileName
+                Group     = "visualization"
+            }) | Out-Null
+    }
+    return $locks.ToArray()
 }
 
 function Show-MainMenu {
     Write-Host ""
     Write-Host "Win10 + RTX 3090 深度学习离线环境工具" -ForegroundColor Green
-    Write-Host "当前版本支持固定 Research 环境：Python 3.11 + PyTorch CUDA 12.8"
+    Write-Host "支持 Python 3.11 + PyTorch CUDA 12.8，可选择 Minimal / Research / Full"
     Write-Host ""
     Write-Host "[1] Download  在联网电脑下载离线包"
     Write-Host "[2] Check     检查离线包完整性（只读，不修改文件）"
@@ -396,6 +503,13 @@ function Test-OfflinePackage {
     if ([int]$manifestPhase -eq 1 -and $optional.Count -ne 0) {
         Add-CheckError $result "phase 1 离线包不支持可选组件，manifest.optionalComponents 必须为空数组。"
     }
+    $manifestProfile = [string](Get-PropertyValue $manifest "profile")
+    if ([string]::IsNullOrWhiteSpace($manifestProfile)) {
+        $manifestProfile = "Research"
+    }
+    if (@("Minimal", "Research", "Full") -notcontains $manifestProfile) {
+        Add-CheckError $result "未知 Profile：$manifestProfile"
+    }
     $knownOptionalComponents = @("Git", "CudaToolkit", "VSCode", "Visualization")
     foreach ($component in $optional) {
         if ($knownOptionalComponents -notcontains [string]$component) {
@@ -434,18 +548,38 @@ function Test-OfflinePackage {
         "torchvision",
         "torchaudio",
         "torch-lock",
-        "research-lock",
+        "minimal-lock",
         "verify-script"
     )
+    if ($manifestProfile -in @("Research", "Full")) {
+        $requiredComponents += "research-lock"
+    }
+    if ($optional -contains "Visualization") {
+        $requiredComponents += "visualization-lock"
+    }
     foreach ($component in $requiredComponents) {
         $matches = @($files | Where-Object { $_.component -eq $component -and $_.required -eq $true })
         if ($matches.Count -eq 0) {
             Add-CheckError $result "必需组件没有登记到 manifest.files：$component"
         }
     }
-    $researchWheels = @($files | Where-Object { $_.group -eq "research" -and $_.kind -eq "wheel" })
-    if ($researchWheels.Count -eq 0) {
-        Add-CheckError $result "没有找到 Research wheels。"
+    $commonWheels = @($files | Where-Object { $_.group -eq "research" -and $_.kind -eq "wheel" })
+    if ($commonWheels.Count -eq 0) {
+        Add-CheckError $result "没有找到通用 Python wheels。"
+    }
+    if ($optional -contains "Visualization") {
+        $visualWheels = @($files | Where-Object { $_.group -eq "visualization" -and $_.kind -eq "wheel" })
+        if ($visualWheels.Count -eq 0) {
+            Add-CheckError $result "已选择 Visualization，但没有找到 visualization wheels。"
+        }
+    }
+    foreach ($optionalInstaller in @("Git", "CudaToolkit", "VSCode")) {
+        if ($optional -contains $optionalInstaller) {
+            $matches = @($files | Where-Object { $_.optionalComponent -eq $optionalInstaller -and $_.kind -eq "installer" })
+            if ($matches.Count -eq 0) {
+                Add-CheckError $result "已选择可选组件 $optionalInstaller，但 manifest.files 中没有对应安装包。"
+            }
+        }
     }
 
     foreach ($entry in $files) {
@@ -796,19 +930,22 @@ function Get-ResolvedLockFile {
 function New-ResolvedInstallLock {
     param([Parameter(Mandatory = $true)][string]$WorkspaceRoot)
     $manifestPath = Get-ManifestPath
+    $manifest = Read-JsonFile $manifestPath
     $sourceManifestHash = Get-Sha256 $manifestPath
     $resolved = Get-ResolvedLockFile $WorkspaceRoot
-    $torchLock = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
-    $researchLock = Join-PackagePath @("requirements", "research.lock.txt")
     $content = New-Object 'System.Collections.Generic.List[string]'
     $content.Add("# Generated by OfflineDL-Win10-3090.ps1") | Out-Null
     $content.Add("# Source manifest sha256: $sourceManifestHash") | Out-Null
-    $content.Add("# Profile: Research") | Out-Null
-    $content.Add("# Optional components: none") | Out-Null
+    $content.Add("# Profile: $([string]$manifest.profile)") | Out-Null
+    $content.Add("# Optional components: $((@(Get-PropertyValue $manifest 'optionalComponents') | Sort-Object) -join ', ')") | Out-Null
     $content.Add("# Generated at: $(Get-IsoTimestamp)") | Out-Null
     $content.Add("# Do not edit manually.") | Out-Null
     $content.Add("") | Out-Null
-    foreach ($lock in @($torchLock, $researchLock)) {
+    foreach ($manifestLock in @(Get-PropertyValue $manifest "lockFiles")) {
+        $lock = Resolve-PackageRelativePath $manifestLock.path
+        if (-not (Test-Path -LiteralPath $lock)) {
+            throw "manifest 记录的 lock 文件不存在：$($manifestLock.path)"
+        }
         $content.Add("# From $(Get-RelativePathFromPackage $lock)") | Out-Null
         foreach ($line in (Get-Content -LiteralPath $lock -Encoding UTF8)) {
             if (-not [string]::IsNullOrWhiteSpace($line) -and -not $line.TrimStart().StartsWith("#")) {
@@ -840,12 +977,53 @@ function Write-FailedInstallState {
     Write-JsonAtomic $failed (Get-FailedInstallStatePath $WorkspaceRoot)
 }
 
+function Assert-ReusableVenv {
+    param([Parameter(Mandatory = $true)][string]$VenvPath)
+    $venvPython = Get-VenvPythonPath $VenvPath
+    $info = Test-PythonCandidate $venvPython
+    if ($null -eq $info) {
+        throw "无法复用虚拟环境：没有找到可用的 venv Python：$venvPython"
+    }
+    if ($info.MajorMinor -ne $Script:PythonMajorMinor -or $info.Architecture -ne 64) {
+        throw "无法复用虚拟环境：Python 必须是 $Script:PythonMajorMinor x64，当前是 $($info.MajorMinor) / $($info.Architecture)bit。"
+    }
+    & $venvPython -m pip --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法复用虚拟环境：venv 内 pip 不可用。"
+    }
+
+    $torchProbe = "import importlib.util, sys; spec=importlib.util.find_spec('torch');" +
+        "print('missing' if spec is None else 'present');" +
+        "sys.exit(0 if spec is None else 0)"
+    $torchState = & $venvPython -c $torchProbe 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法检查虚拟环境中的 torch 状态。建议使用 -RecreateVenv 重建。"
+    }
+    if (($torchState | Select-Object -First 1) -eq "present") {
+        $cudaProbe = "import torch, sys; cuda=torch.version.cuda; print('None' if cuda is None else cuda); sys.exit(0)"
+        $cudaVersion = (& $venvPython -c $cudaProbe 2>$null | Select-Object -First 1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "虚拟环境中已有 torch，但无法导入。建议使用 -RecreateVenv 重建。"
+        }
+        if ([string]::IsNullOrWhiteSpace($cudaVersion) -or $cudaVersion -eq "None") {
+            throw "虚拟环境中已有 CPU 版 PyTorch，不能安全复用。请使用 -RecreateVenv 重建。"
+        }
+        if ($cudaVersion -ne "12.8") {
+            throw "虚拟环境中已有 PyTorch CUDA $cudaVersion，目标是 12.8。请使用 -RecreateVenv 重建。"
+        }
+    }
+    Write-Ok "虚拟环境复用检查通过。"
+}
+
 function Invoke-InstallMode {
     $installStep = "start"
     $resolvedWorkspace = $null
     try {
         $installStep = "check-package"
         Invoke-CheckMode
+        $manifest = Read-JsonFile (Get-ManifestPath)
+        $installProfile = [string]$manifest.profile
+        $installOptionalComponents = @(Get-PropertyValue $manifest "optionalComponents")
 
         $installStep = "workspace"
         $resolvedWorkspace = Resolve-WorkspaceRoot $WorkspaceRoot -Create
@@ -872,24 +1050,33 @@ function Invoke-InstallMode {
 
         $installStep = "venv"
         $venvPath = Get-VenvPath $resolvedWorkspace
+        $reusingVenv = $false
         if (Test-Path -LiteralPath $venvPath) {
-            Assert-VenvDeleteSafe -WorkspaceRoot $resolvedWorkspace -VenvPath $venvPath
-            if (-not $RecreateVenv) {
-                if ($NonInteractive) {
-                    throw "虚拟环境已存在。第一阶段不支持复用，请显式传入 -RecreateVenv 后重建。"
+            if ($ReuseVenv) {
+                Assert-ReusableVenv -VenvPath $venvPath
+                $reusingVenv = $true
+            }
+            else {
+                Assert-VenvDeleteSafe -WorkspaceRoot $resolvedWorkspace -VenvPath $venvPath
+                if (-not $RecreateVenv) {
+                    if ($NonInteractive) {
+                        throw "虚拟环境已存在。若要重建请显式传入 -RecreateVenv；若确认复用请传入 -ReuseVenv。"
+                    }
+                    Write-Warn "检测到已有虚拟环境。默认不复用，建议删除后重建。"
+                    Write-Warn "即将删除：$venvPath"
+                    Confirm-Continue "请输入 DELETE 确认删除" "DELETE" | Out-Null
                 }
-                Write-Warn "检测到已有虚拟环境，第一阶段不支持复用，必须删除后重建。"
-                Write-Warn "即将删除：$venvPath"
-                Confirm-Continue "请输入 DELETE 确认删除" "DELETE" | Out-Null
+                elseif (-not $NonInteractive -and -not $Yes) {
+                    Write-Warn "即将删除：$venvPath"
+                    Confirm-Continue "请输入 DELETE 确认删除" "DELETE" | Out-Null
+                }
+                Remove-Item -LiteralPath $venvPath -Recurse -Force
             }
-            elseif (-not $NonInteractive -and -not $Yes) {
-                Write-Warn "即将删除：$venvPath"
-                Confirm-Continue "请输入 DELETE 确认删除" "DELETE" | Out-Null
-            }
-            Remove-Item -LiteralPath $venvPath -Recurse -Force
         }
-        Ensure-Directory (Split-Path -Parent $venvPath)
-        Invoke-LoggedCommand -FilePath $py.Path -Arguments @("-m", "venv", $venvPath)
+        if (-not $reusingVenv) {
+            Ensure-Directory (Split-Path -Parent $venvPath)
+            Invoke-LoggedCommand -FilePath $py.Path -Arguments @("-m", "venv", $venvPath)
+        }
         $installingMarker = Join-Path $venvPath ".offline_dl_installing"
         Set-Content -LiteralPath $installingMarker -Value (Get-IsoTimestamp) -Encoding ASCII
 
@@ -926,8 +1113,8 @@ function Invoke-InstallMode {
             installStatus           = "success"
             workspaceRoot           = $resolvedWorkspace
             venvPython              = $venvPython
-            profile                 = $Script:Profile
-            optionalComponents      = @()
+            profile                 = $installProfile
+            optionalComponents      = $installOptionalComponents
             pythonMajorMinor        = $Script:PythonMajorMinor
             pythonArch              = "64bit"
             torchCudaTag            = $Script:TorchCudaTag
@@ -1263,16 +1450,40 @@ function Move-StagedFiles {
     }
 }
 
+function Get-LockPackageNames {
+    param([string[]]$RequirementFiles)
+    $names = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($file in $RequirementFiles) {
+        if ([string]::IsNullOrWhiteSpace($file) -or -not (Test-Path -LiteralPath $file)) {
+            continue
+        }
+        foreach ($line in (Get-Content -LiteralPath $file -Encoding UTF8)) {
+            $trimmed = $line.Trim()
+            if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
+                continue
+            }
+            $pkg = ($trimmed -split "==")[0]
+            if (-not [string]::IsNullOrWhiteSpace($pkg)) {
+                $null = $names.Add(($pkg -replace "[-_.]+", "-").ToLowerInvariant())
+            }
+        }
+    }
+    return $names
+}
+
 function Move-ResolvedWheelSet {
     param(
         [Parameter(Mandatory = $true)][string]$Staging,
         [Parameter(Mandatory = $true)][string]$TorchDestination,
-        [Parameter(Mandatory = $true)][string]$CommonDestination
+        [Parameter(Mandatory = $true)][string]$CommonDestination,
+        [Parameter(Mandatory = $true)][string]$OptionalDestination,
+        [Parameter(Mandatory = $true)]$OptionalPackageNames
     )
     Ensure-Directory $TorchDestination
     Ensure-Directory $CommonDestination
+    Ensure-Directory $OptionalDestination
 
-    foreach ($destination in @($TorchDestination, $CommonDestination)) {
+    foreach ($destination in @($TorchDestination, $CommonDestination, $OptionalDestination)) {
         foreach ($oldWheel in Get-ChildItem -LiteralPath $destination -File -Filter "*.whl" -ErrorAction SilentlyContinue) {
             Remove-Item -LiteralPath $oldWheel.FullName -Force
         }
@@ -1285,7 +1496,9 @@ function Move-ResolvedWheelSet {
             $lowerName.StartsWith("torchvision-") -or
             $lowerName.StartsWith("torchaudio-")
         )
-        $destination = if ($isTorchCore) { $TorchDestination } else { $CommonDestination }
+        $parsed = Parse-WheelFileName $file.Name
+        $isOptional = ($null -ne $parsed -and $OptionalPackageNames.Contains($parsed.Package))
+        $destination = if ($isTorchCore) { $TorchDestination } elseif ($isOptional) { $OptionalDestination } else { $CommonDestination }
         $target = Join-Path $destination $file.Name
         Move-Item -LiteralPath $file.FullName -Destination $target -Force
     }
@@ -1318,17 +1531,16 @@ function Download-WheelsToFolder {
 function Download-ResolvedWheels {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
-        [Parameter(Mandatory = $true)][string]$TorchRequirementFile,
-        [Parameter(Mandatory = $true)][string]$ResearchRequirementFile,
+        [Parameter(Mandatory = $true)][string[]]$RequirementFiles,
+        [string[]]$OptionalRequirementFiles = @(),
         [Parameter(Mandatory = $true)][string]$TorchDestination,
-        [Parameter(Mandatory = $true)][string]$CommonDestination
+        [Parameter(Mandatory = $true)][string]$CommonDestination,
+        [Parameter(Mandatory = $true)][string]$OptionalDestination
     )
     $staging = Join-PackagePath @("wheels", "_resolved_staging")
     Clear-StagingDirectory $staging
     $args = @(
         "-m", "pip", "download",
-        "-r", $TorchRequirementFile,
-        "-r", $ResearchRequirementFile,
         "--dest", $staging,
         "--only-binary=:all:",
         "--platform", $Script:Platform,
@@ -1338,8 +1550,12 @@ function Download-ResolvedWheels {
         "--index-url", "https://download.pytorch.org/whl/cu128",
         "--extra-index-url", "https://pypi.org/simple"
     )
+    foreach ($requirement in $RequirementFiles) {
+        $args += @("-r", $requirement)
+    }
     Invoke-LoggedCommand -FilePath $Python -Arguments $args
-    Move-ResolvedWheelSet -Staging $staging -TorchDestination $TorchDestination -CommonDestination $CommonDestination
+    $optionalNames = Get-LockPackageNames $OptionalRequirementFiles
+    Move-ResolvedWheelSet -Staging $staging -TorchDestination $TorchDestination -CommonDestination $CommonDestination -OptionalDestination $OptionalDestination -OptionalPackageNames $optionalNames
     Remove-Item -LiteralPath $staging -Recurse -Force
 }
 
@@ -1363,14 +1579,21 @@ function Assert-PytorchCu128Wheels {
 }
 
 function Build-ManifestFromFiles {
-    param($Config, [string]$DownloadPython, [string]$PipVersion)
+    param(
+        $Config,
+        [string]$DownloadPython,
+        [string]$PipVersion,
+        [Parameter(Mandatory = $true)][string]$ProfileName,
+        [string[]]$OptionalComponents = @(),
+        [Parameter(Mandatory = $true)]$LockSelection
+    )
     $files = New-Object 'System.Collections.Generic.List[object]'
 
     $pythonInstaller = Join-PackagePath @("downloads", "python", $Config.components.python.fileName)
-    $files.Add((New-ManifestFileEntry -FullPath $pythonInstaller -Component "python-installer" -Group "python" -Kind "installer" -SourceUrl $Config.components.python.url)) | Out-Null
+    $files.Add((New-ManifestFileEntry -FullPath $pythonInstaller -Component "python-installer" -Group "python" -Kind "installer" -Profile $ProfileName -SourceUrl $Config.components.python.url)) | Out-Null
 
     $vcInstaller = Join-PackagePath @("downloads", "runtime", $Config.components.vcRuntime.fileName)
-    $files.Add((New-ManifestFileEntry -FullPath $vcInstaller -Component "vc-runtime" -Group "runtime" -Kind "installer" -SourceUrl $Config.components.vcRuntime.url)) | Out-Null
+    $files.Add((New-ManifestFileEntry -FullPath $vcInstaller -Component "vc-runtime" -Group "runtime" -Kind "installer" -Profile $ProfileName -SourceUrl $Config.components.vcRuntime.url)) | Out-Null
 
     $driverDir = Join-PackagePath @("downloads", "drivers")
     $drivers = @(Get-ChildItem -LiteralPath $driverDir -File -Filter "*.exe" -ErrorAction SilentlyContinue)
@@ -1378,44 +1601,66 @@ function Build-ManifestFromFiles {
         throw "缺少 NVIDIA 驱动安装包。请把 RTX 3090 Windows 10 x64 驱动 exe 放到 downloads\drivers，或在 config.json 配置 nvidiaDriver.url。"
     }
     foreach ($driver in $drivers) {
-        $files.Add((New-ManifestFileEntry -FullPath $driver.FullName -Component "nvidia-driver" -Group "driver" -Kind "installer" -SourceUrl $Config.components.nvidiaDriver.url -Source $(if ([string]::IsNullOrWhiteSpace($Config.components.nvidiaDriver.url)) { "manual" } else { "download" }))) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $driver.FullName -Component "nvidia-driver" -Group "driver" -Kind "installer" -Profile $ProfileName -SourceUrl $Config.components.nvidiaDriver.url -Source $(if ([string]::IsNullOrWhiteSpace($Config.components.nvidiaDriver.url)) { "manual" } else { "download" }))) | Out-Null
     }
 
-    $torchLock = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
-    $researchLock = Join-PackagePath @("requirements", "research.lock.txt")
+    $lockFiles = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($lock in @($LockSelection)) {
+        if (-not (Test-Path -LiteralPath $lock.Path)) {
+            throw "缺少 lock 文件：$($lock.Path)"
+        }
+        $files.Add((New-ManifestFileEntry -FullPath $lock.Path -Component $lock.Component -Group "requirements" -Kind "lock" -Profile $lock.Profile -Source "local")) | Out-Null
+        $lockFiles.Add([ordered]@{
+                name    = $lock.Name
+                path    = Get-RelativePathFromPackage $lock.Path
+                sha256  = Get-Sha256 $lock.Path
+                profile = $lock.Profile
+                group   = $lock.Group
+            }) | Out-Null
+    }
+
     $verifyScript = Join-PackagePath @("scripts", "verify_torch_cuda.py")
-    $files.Add((New-ManifestFileEntry -FullPath $torchLock -Component "torch-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
-    $files.Add((New-ManifestFileEntry -FullPath $researchLock -Component "research-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
-    $files.Add((New-ManifestFileEntry -FullPath $verifyScript -Component "verify-script" -Group "script" -Kind "script" -Source "local")) | Out-Null
+    $files.Add((New-ManifestFileEntry -FullPath $verifyScript -Component "verify-script" -Group "script" -Kind "script" -Profile $ProfileName -Source "local")) | Out-Null
 
     $torchDir = Join-PackagePath @("wheels", "pytorch-cu128")
     foreach ($wheel in Get-ChildItem -LiteralPath $torchDir -File -Filter "*.whl" -ErrorAction SilentlyContinue) {
         $parsed = Parse-WheelFileName $wheel.Name
         $component = if ($null -ne $parsed) { $parsed.Package } else { "pytorch-wheel" }
-        $files.Add((New-ManifestFileEntry -FullPath $wheel.FullName -Component $component -Group "pytorch" -Kind "wheel" -SourceUrl "https://download.pytorch.org/whl/cu128")) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $wheel.FullName -Component $component -Group "pytorch" -Kind "wheel" -Profile $ProfileName -SourceUrl "https://download.pytorch.org/whl/cu128")) | Out-Null
     }
 
     $commonDir = Join-PackagePath @("wheels", "common")
     foreach ($wheel in Get-ChildItem -LiteralPath $commonDir -File -Filter "*.whl" -ErrorAction SilentlyContinue) {
         $parsed = Parse-WheelFileName $wheel.Name
         $component = if ($null -ne $parsed) { $parsed.Package } else { "research-wheel" }
-        $files.Add((New-ManifestFileEntry -FullPath $wheel.FullName -Component $component -Group "research" -Kind "wheel" -SourceUrl "https://pypi.org/simple")) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $wheel.FullName -Component $component -Group "research" -Kind "wheel" -Profile $ProfileName -SourceUrl "https://pypi.org/simple")) | Out-Null
     }
 
-    $lockFiles = @(
-        [ordered]@{
-            name    = "torch-cu128.lock.txt"
-            path    = "requirements\torch-cu128.lock.txt"
-            sha256  = Get-Sha256 $torchLock
-            profile = "Research"
-        },
-        [ordered]@{
-            name    = "research.lock.txt"
-            path    = "requirements\research.lock.txt"
-            sha256  = Get-Sha256 $researchLock
-            profile = "Research"
+    $optionalDir = Join-PackagePath @("wheels", "optional")
+    foreach ($wheel in Get-ChildItem -LiteralPath $optionalDir -File -Filter "*.whl" -ErrorAction SilentlyContinue) {
+        $parsed = Parse-WheelFileName $wheel.Name
+        $component = if ($null -ne $parsed) { $parsed.Package } else { "optional-wheel" }
+        $files.Add((New-ManifestFileEntry -FullPath $wheel.FullName -Component $component -Group "visualization" -Kind "wheel" -Profile $ProfileName -SourceUrl "https://pypi.org/simple" -OptionalComponent "Visualization")) | Out-Null
+    }
+
+    $manualScan = Get-RegisterLocalFileEntries
+    foreach ($warning in $manualScan.Warnings) {
+        Write-Warn $warning
+    }
+    foreach ($entry in @($manualScan.Entries)) {
+        if ((-not $entry.required) -and ($OptionalComponents -contains [string]$entry.optionalComponent)) {
+            $files.Add($entry) | Out-Null
         }
-    )
+    }
+
+    foreach ($optional in $OptionalComponents) {
+        if ($optional -in @("Git", "CudaToolkit", "VSCode")) {
+            $matches = @($files | Where-Object { $_.optionalComponent -eq $optional })
+            if ($matches.Count -eq 0) {
+                throw "已选择可选组件 $optional，但没有找到对应安装包。请先把安装包放入 downloads\tools_optional 或 downloads\cuda_optional。"
+            }
+        }
+    }
 
     return [ordered]@{
         schemaVersion          = $Script:SchemaVersion
@@ -1423,8 +1668,8 @@ function Build-ManifestFromFiles {
         packageStatus          = "complete"
         createdAt              = Get-IsoTimestamp
         createdByScriptVersion = $Script:ScriptVersion
-        profile                = $Script:Profile
-        optionalComponents     = @()
+        profile                = $ProfileName
+        optionalComponents     = @($OptionalComponents | Sort-Object)
         pythonMajorMinor       = $Script:PythonMajorMinor
         pythonAbi              = $Script:PythonAbi
         platform               = $Script:Platform
@@ -1438,16 +1683,15 @@ function Build-ManifestFromFiles {
         downloadCommands       = @(
             [ordered]@{
                 component     = "resolved-wheel-set"
-                lockFile      = "requirements\torch-cu128.lock.txt"
-                extraLockFile = "requirements\research.lock.txt"
+                lockFiles     = @($LockSelection | ForEach-Object { Get-RelativePathFromPackage $_.Path })
                 indexUrl      = "https://download.pytorch.org/whl/cu128"
                 extraIndexUrl = "https://pypi.org/simple"
-                destination   = "wheels\pytorch-cu128 + wheels\common"
+                destination   = "wheels\pytorch-cu128 + wheels\common + wheels\optional"
                 platform      = $Script:Platform
                 pythonAbi     = $Script:PythonAbi
             }
         )
-        lockFiles              = $lockFiles
+        lockFiles              = $lockFiles.ToArray()
         files                  = $files.ToArray()
     }
 }
@@ -1467,29 +1711,23 @@ function Set-JsonProperty {
 }
 
 function New-BaseManifest {
-    $torchLock = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
-    $researchLock = Join-PackagePath @("requirements", "research.lock.txt")
     $verifyScript = Join-PackagePath @("scripts", "verify_torch_cuda.py")
 
     $lockFiles = New-Object 'System.Collections.Generic.List[object]'
     $files = New-Object 'System.Collections.Generic.List[object]'
-    if (Test-Path -LiteralPath $torchLock) {
+    $defaultLocks = Get-LockSelection -ProfileName "Research" -OptionalComponents @()
+    foreach ($lock in @($defaultLocks)) {
+        if (-not (Test-Path -LiteralPath $lock.Path)) {
+            continue
+        }
         $lockFiles.Add([ordered]@{
-                name    = "torch-cu128.lock.txt"
-                path    = "requirements\torch-cu128.lock.txt"
-                sha256  = Get-Sha256 $torchLock
-                profile = "Research"
+                name    = $lock.Name
+                path    = Get-RelativePathFromPackage $lock.Path
+                sha256  = Get-Sha256 $lock.Path
+                profile = $lock.Profile
+                group   = $lock.Group
             }) | Out-Null
-        $files.Add((New-ManifestFileEntry -FullPath $torchLock -Component "torch-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
-    }
-    if (Test-Path -LiteralPath $researchLock) {
-        $lockFiles.Add([ordered]@{
-                name    = "research.lock.txt"
-                path    = "requirements\research.lock.txt"
-                sha256  = Get-Sha256 $researchLock
-                profile = "Research"
-            }) | Out-Null
-        $files.Add((New-ManifestFileEntry -FullPath $researchLock -Component "research-lock" -Group "requirements" -Kind "lock" -Source "local")) | Out-Null
+        $files.Add((New-ManifestFileEntry -FullPath $lock.Path -Component $lock.Component -Group "requirements" -Kind "lock" -Profile $lock.Profile -Source "local")) | Out-Null
     }
     if (Test-Path -LiteralPath $verifyScript) {
         $files.Add((New-ManifestFileEntry -FullPath $verifyScript -Component "verify-script" -Group "script" -Kind "script" -Source "local")) | Out-Null
@@ -1716,9 +1954,20 @@ function Invoke-RegisterLocalFilesMode {
 }
 
 function Invoke-DownloadMode {
+    $profileName = Resolve-EffectiveProfile
+    $optionalComponents = @(Get-SelectedOptionalComponents -ProfileName $profileName)
+    $lockSelection = @(Get-LockSelection -ProfileName $profileName -OptionalComponents $optionalComponents)
+
     Write-Host ""
     Write-Warn "下载内容会保存到当前脚本所在文件夹：$Script:PackageRoot"
     Write-Warn "下载完成后，请拷贝整个文件夹到离线电脑，不要只拷贝 wheels 或 downloads。"
+    Write-Info "本次离线包档位：$profileName"
+    if (@($optionalComponents).Count -gt 0) {
+        Write-Info "本次可选组件：$($optionalComponents -join ', ')"
+    }
+    else {
+        Write-Info "本次不包含可选组件。"
+    }
     Confirm-Continue "确认在此文件夹下载离线包吗？" "y" | Out-Null
 
     Enable-Tls12
@@ -1736,6 +1985,15 @@ function Invoke-DownloadMode {
     Test-InternetEndpoint "https://pypi.org/simple"
     Test-InternetEndpoint "https://download.pytorch.org/whl/cu128"
     Assert-NvidiaDriverSourceAvailable $config
+    $preScan = Get-RegisterLocalFileEntries
+    foreach ($warning in $preScan.Warnings) {
+        Write-Warn $warning
+    }
+    foreach ($optionalInstaller in @("Git", "CudaToolkit", "VSCode")) {
+        if ($optionalComponents -contains $optionalInstaller -and @($preScan.OptionalComponents) -notcontains $optionalInstaller) {
+            throw "已选择 $optionalInstaller，但没有发现可登记的本地安装包。请先把对应 exe 放入 downloads\tools_optional 或 downloads\cuda_optional。"
+        }
+    }
 
     $pythonInstaller = Join-PackagePath @("downloads", "python", $config.components.python.fileName)
     Download-FileWithPart -Url $config.components.python.url -Destination $pythonInstaller
@@ -1760,17 +2018,19 @@ function Invoke-DownloadMode {
         Write-Warn "NVIDIA 驱动使用本地已存在文件登记：$($drivers[0].FullName)"
     }
 
-    $torchReq = Join-PackagePath @("requirements", "torch-cu128.lock.txt")
-    $researchReq = Join-PackagePath @("requirements", "research.lock.txt")
     $torchDest = Join-PackagePath @("wheels", "pytorch-cu128")
     $commonDest = Join-PackagePath @("wheels", "common")
+    $optionalDest = Join-PackagePath @("wheels", "optional")
     Confirm-WheelDirectoryCanBeReplaced $torchDest
     Confirm-WheelDirectoryCanBeReplaced $commonDest
+    Confirm-WheelDirectoryCanBeReplaced $optionalDest
 
-    Download-ResolvedWheels -Python $downloadPython -TorchRequirementFile $torchReq -ResearchRequirementFile $researchReq -TorchDestination $torchDest -CommonDestination $commonDest
+    $allRequirementFiles = @($lockSelection | ForEach-Object { $_.Path })
+    $optionalRequirementFiles = @($lockSelection | Where-Object { $_.Component -eq "visualization-lock" } | ForEach-Object { $_.Path })
+    Download-ResolvedWheels -Python $downloadPython -RequirementFiles $allRequirementFiles -OptionalRequirementFiles $optionalRequirementFiles -TorchDestination $torchDest -CommonDestination $commonDest -OptionalDestination $optionalDest
     Assert-PytorchCu128Wheels
 
-    $manifest = Build-ManifestFromFiles -Config $config -DownloadPython $downloadPython -PipVersion ($pipVersion -join " ")
+    $manifest = Build-ManifestFromFiles -Config $config -DownloadPython $downloadPython -PipVersion ($pipVersion -join " ") -ProfileName $profileName -OptionalComponents $optionalComponents -LockSelection $lockSelection
     $manifestPath = Get-ManifestPath
     Write-JsonAtomic $manifest $manifestPath
 
@@ -1786,7 +2046,7 @@ function Invoke-DownloadMode {
 }
 
 function Invoke-Main {
-    Reject-UnsupportedPhase2Options
+    Assert-ParameterCombination
     if ([string]::IsNullOrWhiteSpace($Mode)) {
         $selected = Show-MainMenu
         if ([string]::IsNullOrWhiteSpace($selected)) {
@@ -1794,6 +2054,7 @@ function Invoke-Main {
             return 0
         }
         $script:Mode = $selected
+        Assert-ParameterCombination
     }
 
     Start-RunLog $Mode

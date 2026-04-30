@@ -1,0 +1,7 @@
+# Minimal top-level lock.
+# Basic scientific runtime shared by Minimal, Research, and Full profiles.
+numpy==2.2.6
+scipy==1.15.3
+pandas==2.2.3
+pillow==11.2.1
+tqdm==4.67.1
