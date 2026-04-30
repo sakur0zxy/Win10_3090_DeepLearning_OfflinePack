@@ -1072,6 +1072,35 @@ function Download-FileWithPart {
     Move-Item -LiteralPath $part -Destination $Destination -Force
 }
 
+function Assert-NvidiaDriverSourceAvailable {
+    param($Config)
+    if (-not [string]::IsNullOrWhiteSpace($Config.components.nvidiaDriver.url)) {
+        return
+    }
+    $driverDir = Join-PackagePath @("downloads", "drivers")
+    $drivers = @(Get-ChildItem -LiteralPath $driverDir -File -Filter "*.exe" -ErrorAction SilentlyContinue)
+    if ($drivers.Count -eq 0) {
+        throw "没有 NVIDIA 驱动来源。请先从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe 放到 downloads\drivers，或在 config.json 写入 nvidiaDriver.url。"
+    }
+}
+
+function Confirm-WheelDirectoryCanBeReplaced {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    Ensure-Directory $Path
+    $wheels = @(Get-ChildItem -LiteralPath $Path -File -Filter "*.whl" -ErrorAction SilentlyContinue)
+    if ($wheels.Count -eq 0) {
+        return
+    }
+    if ($Force -or $Yes) {
+        return
+    }
+    if ($NonInteractive) {
+        throw "wheels 目录已有旧 wheel，非交互模式下请使用 -Force 清理后重新下载：$Path"
+    }
+    Write-Warn "检测到已有 wheel：$Path"
+    Confirm-Continue "为避免旧包混入新离线包，下载成功后是否替换这些 wheel？" "y" | Out-Null
+}
+
 function Clear-StagingDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
     $full = [System.IO.Path]::GetFullPath($Path)
@@ -1106,6 +1135,34 @@ function Move-StagedFiles {
     }
 }
 
+function Move-ResolvedWheelSet {
+    param(
+        [Parameter(Mandatory = $true)][string]$Staging,
+        [Parameter(Mandatory = $true)][string]$TorchDestination,
+        [Parameter(Mandatory = $true)][string]$CommonDestination
+    )
+    Ensure-Directory $TorchDestination
+    Ensure-Directory $CommonDestination
+
+    foreach ($destination in @($TorchDestination, $CommonDestination)) {
+        foreach ($oldWheel in Get-ChildItem -LiteralPath $destination -File -Filter "*.whl" -ErrorAction SilentlyContinue) {
+            Remove-Item -LiteralPath $oldWheel.FullName -Force
+        }
+    }
+
+    foreach ($file in Get-ChildItem -LiteralPath $Staging -File -Filter "*.whl") {
+        $lowerName = $file.Name.ToLowerInvariant()
+        $isTorchCore = (
+            $lowerName.StartsWith("torch-") -or
+            $lowerName.StartsWith("torchvision-") -or
+            $lowerName.StartsWith("torchaudio-")
+        )
+        $destination = if ($isTorchCore) { $TorchDestination } else { $CommonDestination }
+        $target = Join-Path $destination $file.Name
+        Move-Item -LiteralPath $file.FullName -Destination $target -Force
+    }
+}
+
 function Download-WheelsToFolder {
     param(
         [Parameter(Mandatory = $true)][string]$Python,
@@ -1127,6 +1184,34 @@ function Download-WheelsToFolder {
     ) + $ExtraPipArgs
     Invoke-LoggedCommand -FilePath $Python -Arguments $args
     Move-StagedFiles -Staging $staging -Destination $Destination
+    Remove-Item -LiteralPath $staging -Recurse -Force
+}
+
+function Download-ResolvedWheels {
+    param(
+        [Parameter(Mandatory = $true)][string]$Python,
+        [Parameter(Mandatory = $true)][string]$TorchRequirementFile,
+        [Parameter(Mandatory = $true)][string]$ResearchRequirementFile,
+        [Parameter(Mandatory = $true)][string]$TorchDestination,
+        [Parameter(Mandatory = $true)][string]$CommonDestination
+    )
+    $staging = Join-PackagePath @("wheels", "_resolved_staging")
+    Clear-StagingDirectory $staging
+    $args = @(
+        "-m", "pip", "download",
+        "-r", $TorchRequirementFile,
+        "-r", $ResearchRequirementFile,
+        "--dest", $staging,
+        "--only-binary=:all:",
+        "--platform", $Script:Platform,
+        "--implementation", "cp",
+        "--python-version", "311",
+        "--abi", $Script:PythonAbi,
+        "--index-url", "https://download.pytorch.org/whl/cu128",
+        "--extra-index-url", "https://pypi.org/simple"
+    )
+    Invoke-LoggedCommand -FilePath $Python -Arguments $args
+    Move-ResolvedWheelSet -Staging $staging -TorchDestination $TorchDestination -CommonDestination $CommonDestination
     Remove-Item -LiteralPath $staging -Recurse -Force
 }
 
@@ -1224,21 +1309,14 @@ function Build-ManifestFromFiles {
         }
         downloadCommands       = @(
             [ordered]@{
-                component     = "pytorch"
+                component     = "resolved-wheel-set"
                 lockFile      = "requirements\torch-cu128.lock.txt"
+                extraLockFile = "requirements\research.lock.txt"
                 indexUrl      = "https://download.pytorch.org/whl/cu128"
                 extraIndexUrl = "https://pypi.org/simple"
-                destination   = "wheels\pytorch-cu128"
+                destination   = "wheels\pytorch-cu128 + wheels\common"
                 platform      = $Script:Platform
                 pythonAbi     = $Script:PythonAbi
-            },
-            [ordered]@{
-                component   = "research"
-                lockFile    = "requirements\research.lock.txt"
-                indexUrl    = "https://pypi.org/simple"
-                destination = "wheels\common"
-                platform    = $Script:Platform
-                pythonAbi   = $Script:PythonAbi
             }
         )
         lockFiles              = $lockFiles
@@ -1266,6 +1344,7 @@ function Invoke-DownloadMode {
 
     Test-InternetEndpoint "https://pypi.org/simple"
     Test-InternetEndpoint "https://download.pytorch.org/whl/cu128"
+    Assert-NvidiaDriverSourceAvailable $config
 
     $pythonInstaller = Join-PackagePath @("downloads", "python", $config.components.python.fileName)
     Download-FileWithPart -Url $config.components.python.url -Destination $pythonInstaller
@@ -1294,10 +1373,11 @@ function Invoke-DownloadMode {
     $researchReq = Join-PackagePath @("requirements", "research.lock.txt")
     $torchDest = Join-PackagePath @("wheels", "pytorch-cu128")
     $commonDest = Join-PackagePath @("wheels", "common")
+    Confirm-WheelDirectoryCanBeReplaced $torchDest
+    Confirm-WheelDirectoryCanBeReplaced $commonDest
 
-    Download-WheelsToFolder -Python $downloadPython -RequirementFile $torchReq -Destination $torchDest -ExtraPipArgs @("--index-url", "https://download.pytorch.org/whl/cu128", "--extra-index-url", "https://pypi.org/simple")
+    Download-ResolvedWheels -Python $downloadPython -TorchRequirementFile $torchReq -ResearchRequirementFile $researchReq -TorchDestination $torchDest -CommonDestination $commonDest
     Assert-PytorchCu128Wheels
-    Download-WheelsToFolder -Python $downloadPython -RequirementFile $researchReq -Destination $commonDest -ExtraPipArgs @("--constraint", $torchReq, "--find-links", $torchDest)
 
     $manifest = Build-ManifestFromFiles -Config $config -DownloadPython $downloadPython -PipVersion ($pipVersion -join " ")
     $manifestPath = Get-ManifestPath
