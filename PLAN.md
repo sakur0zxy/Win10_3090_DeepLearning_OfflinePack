@@ -160,7 +160,7 @@ Download:
 7. Generates `manifest.json`.
 8. Runs internal validation and writes `packageStatus = complete` on success.
 
-Git, CUDA Toolkit, and VS Code are manual installer registrations. They are not silently installed.
+Git, CUDA Toolkit, and VS Code are manual installer registrations. They are not silently installed. Users can put all manually downloaded exe installers into `downloads\manual_inbox`; `Download` and `RegisterLocalFiles` will classify and move them into the matching final folders. For compatibility, exe files accidentally placed in the `downloads` root are also scanned.
 
 ## Check
 
@@ -181,6 +181,7 @@ Check is read-only. It validates:
 RegisterLocalFiles scans manual installer folders:
 
 ```text
+downloads\manual_inbox
 downloads\drivers
 downloads\cuda_optional
 downloads\tools_optional

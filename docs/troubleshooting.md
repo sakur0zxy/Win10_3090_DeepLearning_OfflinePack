@@ -68,7 +68,13 @@ Verify 会检查 `torch.version.cuda`，并运行 1024x1024 CUDA 矩阵乘法。
 
 ## RegisterLocalFiles 没有发现文件
 
-请确认文件放在正确目录：
+请确认文件已放到统一收件箱，脚本会自动整理到正确目录：
+
+```text
+downloads\manual_inbox
+```
+
+如果已经整理完成，对应目录如下：
 
 ```text
 downloads\drivers          NVIDIA 驱动 exe

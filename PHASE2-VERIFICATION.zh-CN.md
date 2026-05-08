@@ -21,10 +21,13 @@
 扫描路径：
 
 ```text
+downloads\manual_inbox
 downloads\drivers
 downloads\cuda_optional
 downloads\tools_optional
 ```
+
+用户优先把手动下载的 exe 放到 `downloads\manual_inbox`；脚本会读取并整理到对应目录。为了兼容误放，`downloads` 根目录下的 exe 也会被尝试识别和整理。
 
 登记规则：
 

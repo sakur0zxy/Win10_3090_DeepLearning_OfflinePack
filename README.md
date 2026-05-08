@@ -18,7 +18,7 @@
 2. 选择 `Download`。
 3. 选择档位：`Minimal`、`Research` 或 `Full`。
 4. 按提示决定是否加入 Visualization、Git、CUDA Toolkit、VS Code。
-5. 如果提示缺少 NVIDIA 驱动，请从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放到 `downloads\drivers`。
+5. 如果提示缺少 NVIDIA 驱动，请从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe，放到 `downloads\manual_inbox`，脚本会自动整理到对应目录。
 6. 下载完成后运行 `Check`。
 7. Check 通过后，拷贝整个 `Win10_3090_DeepLearning_OfflinePack` 文件夹到离线电脑。
 
@@ -74,10 +74,22 @@ powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
 
 手动文件放置位置：
 
+推荐把所有手动下载的 exe 先放到统一收件箱：
+
+```text
+downloads\manual_inbox
+```
+
+运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到对应目录。如果你已经把 exe 放在 `downloads` 根目录，脚本也会尝试识别并整理。
+
+整理后的目录：
+
 ```text
 downloads\drivers          NVIDIA 驱动安装包
 downloads\cuda_optional    CUDA Toolkit local installer
 downloads\tools_optional   Git / VS Code 安装包
+downloads\python           Python 安装包
+downloads\runtime          VC++ Runtime 安装包
 ```
 
 CUDA Toolkit 必须是离线完整安装包，不接受小体积 network installer。
@@ -86,14 +98,14 @@ CUDA Toolkit 必须是离线完整安装包，不接受小体积 network install
 
 脚本在 `Download` 和 `RegisterLocalFiles` 中也会显示这些入口：
 
-| 软件 | 官方页面 | 放置位置 |
+| 软件 | 官方页面 | 推荐放置位置 |
 | --- | --- | --- |
-| NVIDIA RTX 3090 驱动 | https://www.nvidia.com/Download/index.aspx | `downloads\drivers` |
-| Python 3.11.9 x64 | https://www.python.org/downloads/release/python-3119/ | `downloads\python` |
-| VC++ Runtime x64 | https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170 | `downloads\runtime` |
-| Git for Windows | https://git-scm.com/install/windows.html | `downloads\tools_optional` |
-| CUDA Toolkit | https://developer.nvidia.com/cuda-toolkit-archive | `downloads\cuda_optional` |
-| VS Code | https://code.visualstudio.com/download | `downloads\tools_optional` |
+| NVIDIA RTX 3090 驱动 | https://www.nvidia.com/Download/index.aspx | `downloads\manual_inbox` |
+| Python 3.11.9 x64 | https://www.python.org/downloads/release/python-3119/ | `downloads\manual_inbox` |
+| VC++ Runtime x64 | https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170 | `downloads\manual_inbox` |
+| Git for Windows | https://git-scm.com/install/windows.html | `downloads\manual_inbox` |
+| CUDA Toolkit | https://developer.nvidia.com/cuda-toolkit-archive | `downloads\manual_inbox` |
+| VS Code | https://code.visualstudio.com/download | `downloads\manual_inbox` |
 
 CUDA Toolkit 请选择 Windows / x86_64 / Windows 10 / exe (local)，不要选 network installer。
 

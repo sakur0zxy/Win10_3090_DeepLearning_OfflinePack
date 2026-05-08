@@ -160,12 +160,13 @@ Download 会：
 7. 生成 `manifest.json`。
 8. 调用内部校验函数，成功后写 `packageStatus = complete`。
 
-如果选择 Git / CUDA Toolkit / VS Code，脚本只登记本地安装包，不会自动下载安装它们。用户需要提前把对应 exe 放到：
+如果选择 Git / CUDA Toolkit / VS Code，脚本只登记本地安装包，不会自动下载安装它们。用户可以把对应 exe 统一放到：
 
 ```text
-downloads\tools_optional
-downloads\cuda_optional
+downloads\manual_inbox
 ```
+
+运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到 `downloads\tools_optional`、`downloads\cuda_optional` 等对应目录。为了兼容误放，脚本也会尝试识别 `downloads` 根目录下的 exe。
 
 ## Check
 
@@ -188,6 +189,8 @@ RegisterLocalFiles 用于登记用户手动放进目录的安装包：
 - CUDA Toolkit local installer
 - Git
 - VS Code
+
+推荐用户把这些 exe 先放到 `downloads\manual_inbox`，由脚本整理后再登记。
 
 该模式会原子更新 manifest；普通 Check 仍然只读。
 

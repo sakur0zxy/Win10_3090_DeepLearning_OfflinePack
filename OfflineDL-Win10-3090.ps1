@@ -22,7 +22,7 @@ $Script:InitialBoundParameters = $PSBoundParameters
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Script:ScriptVersion = "0.3.0"
+$Script:ScriptVersion = "0.3.1"
 $Script:SchemaVersion = 1
 $Script:Phase = 2
 $Script:SupportedManifestPhases = @(1, 2)
@@ -183,12 +183,12 @@ function Get-SelectedOptionalComponents {
         $visualAnswer = Read-Host "是否加入可视化增强包（seaborn/plotly/ipywidgets/mlflow）？输入 y 加入，直接回车跳过"
         if ($visualAnswer -eq "y") { $null = $set.Add("Visualization") }
         if ($ProfileName -ne "Full") {
-            $gitAnswer = Read-Host "是否登记 Git 安装包？需要你先把 Git exe 放到 downloads\tools_optional。输入 y 加入，直接回车跳过"
+            $gitAnswer = Read-Host "是否登记 Git 安装包？把 Git exe 放到 downloads\manual_inbox 即可，脚本会自动整理。输入 y 加入，直接回车跳过"
             if ($gitAnswer -eq "y") { $null = $set.Add("Git") }
-            $cudaAnswer = Read-Host "是否登记 CUDA Toolkit 离线安装包？需要你先把 local installer 放到 downloads\cuda_optional。输入 y 加入，直接回车跳过"
+            $cudaAnswer = Read-Host "是否登记 CUDA Toolkit 离线安装包？把 local installer 放到 downloads\manual_inbox 即可，脚本会自动整理。输入 y 加入，直接回车跳过"
             if ($cudaAnswer -eq "y") { $null = $set.Add("CudaToolkit") }
         }
-        $vscodeAnswer = Read-Host "是否登记 VS Code 安装包？需要你先把 VS Code exe 放到 downloads\tools_optional。输入 y 加入，直接回车跳过"
+        $vscodeAnswer = Read-Host "是否登记 VS Code 安装包？把 VS Code exe 放到 downloads\manual_inbox 即可，脚本会自动整理。输入 y 加入，直接回车跳过"
         if ($vscodeAnswer -eq "y") { $null = $set.Add("VSCode") }
     }
     return @($set | Sort-Object)
@@ -208,7 +208,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "Python 3.11.9 x64"
                 Url    = "https://www.python.org/downloads/release/python-3119/"
-                SaveTo = "downloads\python\python-3.11.9-amd64.exe"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\python"
                 Note   = "脚本通常会自动下载；手动下载时请选择 Windows installer (64-bit)。"
             }) | Out-Null
     }
@@ -216,7 +216,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "Microsoft VC++ Runtime x64"
                 Url    = "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170"
-                SaveTo = "downloads\runtime\VC_redist.x64.exe"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\runtime"
                 Note   = "脚本通常会自动下载；手动下载时请选择 X64 版本。"
             }) | Out-Null
     }
@@ -224,7 +224,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "NVIDIA RTX 3090 Windows 10 x64 驱动"
                 Url    = "https://www.nvidia.com/Download/index.aspx"
-                SaveTo = "downloads\drivers"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\drivers"
                 Note   = "请选择 GeForce RTX 30 Series / GeForce RTX 3090 / Windows 10 64-bit，Studio Driver 或 Game Ready Driver 都可以。"
             }) | Out-Null
     }
@@ -232,7 +232,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "Git for Windows x64"
                 Url    = "https://git-scm.com/install/windows.html"
-                SaveTo = "downloads\tools_optional"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\tools_optional"
                 Note   = "下载 x64 Setup 安装包；这里只登记，不会自动安装。"
             }) | Out-Null
     }
@@ -240,7 +240,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "NVIDIA CUDA Toolkit Windows local installer"
                 Url    = "https://developer.nvidia.com/cuda-toolkit-archive"
-                SaveTo = "downloads\cuda_optional"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\cuda_optional"
                 Note   = "请选择 Windows / x86_64 / 10 / exe (local)，不要下载 network installer。"
             }) | Out-Null
     }
@@ -248,7 +248,7 @@ function Get-ManualDownloadHelpItems {
         $items.Add([pscustomobject]@{
                 Name   = "Visual Studio Code Windows"
                 Url    = "https://code.visualstudio.com/download"
-                SaveTo = "downloads\tools_optional"
+                SaveTo = "downloads\manual_inbox（推荐）；脚本会整理到 downloads\tools_optional"
                 Note   = "下载 Windows x64 User Installer 或 System Installer；这里只登记，不会自动安装。"
             }) | Out-Null
     }
@@ -263,6 +263,8 @@ function Write-ManualDownloadHelp {
     }
     Write-Host ""
     Write-Host "需要手动下载时可参考这些官方页面：" -ForegroundColor Green
+    Write-Host "推荐把手动下载的 exe 都先放到 downloads\manual_inbox；脚本会读取并整理到对应目录。"
+    Write-Host "如果已经放在 downloads 根目录，脚本也会尝试识别并整理。"
     foreach ($item in $items) {
         Write-Host ("- {0}" -f $item.Name)
         Write-Host ("  官网：{0}" -f $item.Url)
@@ -270,6 +272,143 @@ function Write-ManualDownloadHelp {
         Write-Host ("  备注：{0}" -f $item.Note)
     }
     Write-Host ""
+}
+
+function Get-ManualInboxPath {
+    return (Join-PackagePath @("downloads", "manual_inbox"))
+}
+
+function Assert-PathUnderRoot {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Root
+    )
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullRoot = [System.IO.Path]::GetFullPath($Root)
+    if (-not $fullRoot.EndsWith([System.IO.Path]::DirectorySeparatorChar)) {
+        $fullRoot = $fullRoot + [System.IO.Path]::DirectorySeparatorChar
+    }
+    if (-not $fullPath.StartsWith($fullRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "路径不在允许目录内，已拒绝操作：$fullPath"
+    }
+}
+
+function Get-ManualInstallerKind {
+    param([Parameter(Mandatory = $true)][System.IO.FileInfo]$File)
+    if ($File.Extension.ToLowerInvariant() -ne ".exe") {
+        return ""
+    }
+    $name = $File.Name.ToLowerInvariant()
+    if ($name -match "vc_redist|vcredist") {
+        return "vc-runtime"
+    }
+    if ($name -match "^python-3\.11.*(amd64|x64).*\.exe$") {
+        return "python"
+    }
+    if ($name -match "cuda|toolkit") {
+        return "cuda-toolkit"
+    }
+    if ($name -match "git") {
+        return "git"
+    }
+    if ($name -match "code|vscode|visualstudiocode") {
+        return "vscode"
+    }
+    if ($name -match "nvidia|geforce|studio|game|desktop-win|dch|whql" -or $File.Length -gt 300MB) {
+        return "nvidia-driver"
+    }
+    return ""
+}
+
+function Get-ManualInstallerDestination {
+    param([Parameter(Mandatory = $true)][string]$Kind)
+    switch ($Kind) {
+        "nvidia-driver" { return (Join-PackagePath @("downloads", "drivers")) }
+        "cuda-toolkit" { return (Join-PackagePath @("downloads", "cuda_optional")) }
+        "git" { return (Join-PackagePath @("downloads", "tools_optional")) }
+        "vscode" { return (Join-PackagePath @("downloads", "tools_optional")) }
+        "python" { return (Join-PackagePath @("downloads", "python")) }
+        "vc-runtime" { return (Join-PackagePath @("downloads", "runtime")) }
+        default { throw "未知手动安装包类型：$Kind" }
+    }
+}
+
+function Move-ManualInboxFiles {
+    $downloadsRoot = Join-PackagePath @("downloads")
+    $manualInbox = Get-ManualInboxPath
+    Ensure-Directory $manualInbox
+
+    $moved = New-Object 'System.Collections.Generic.List[object]'
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+    $candidateFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+
+    foreach ($folder in @($manualInbox, $downloadsRoot)) {
+        if (Test-Path -LiteralPath $folder) {
+            foreach ($file in Get-ChildItem -LiteralPath $folder -File -Filter "*.exe" -ErrorAction SilentlyContinue) {
+                $candidateFiles.Add($file) | Out-Null
+            }
+        }
+    }
+
+    foreach ($file in $candidateFiles) {
+        $kind = Get-ManualInstallerKind -File $file
+        if ([string]::IsNullOrWhiteSpace($kind)) {
+            $warnings.Add("未识别手动安装包，已跳过：$($file.FullName)") | Out-Null
+            continue
+        }
+
+        $check = Test-ManualInstallerFile -File $file -Kind $kind
+        foreach ($warning in $check.Warnings) {
+            $warnings.Add($warning) | Out-Null
+        }
+        if (-not $check.Accept) {
+            continue
+        }
+
+        $destinationDir = Get-ManualInstallerDestination -Kind $kind
+        Ensure-Directory $destinationDir
+        $targetPath = Join-Path $destinationDir $file.Name
+        $sourceFull = [System.IO.Path]::GetFullPath($file.FullName)
+        $targetFull = [System.IO.Path]::GetFullPath($targetPath)
+
+        Assert-PathUnderRoot -Path $sourceFull -Root $downloadsRoot
+        Assert-PathUnderRoot -Path $targetFull -Root $downloadsRoot
+
+        if ($sourceFull.Equals($targetFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+            continue
+        }
+
+        if (Test-Path -LiteralPath $targetFull) {
+            $sourceHash = Get-Sha256 $sourceFull
+            $targetHash = Get-Sha256 $targetFull
+            if ($sourceHash -eq $targetHash) {
+                Remove-Item -LiteralPath $sourceFull -Force
+                $moved.Add([pscustomobject]@{
+                        Kind   = $kind
+                        Source = $sourceFull
+                        Target = $targetFull
+                        Action = "目标已存在相同文件，已删除收件箱重复文件"
+                    }) | Out-Null
+                continue
+            }
+            if (-not $Force) {
+                throw "目标目录已有同名但 SHA256 不同的文件：$targetFull。请手动改名/删除，或确认后使用 -Force 覆盖。"
+            }
+        }
+
+        Move-Item -LiteralPath $sourceFull -Destination $targetFull -Force
+        $moved.Add([pscustomobject]@{
+                Kind   = $kind
+                Source = $sourceFull
+                Target = $targetFull
+                Action = "已移动"
+            }) | Out-Null
+    }
+
+    return [pscustomobject]@{
+        Moved    = $moved.ToArray()
+        Warnings = $warnings.ToArray()
+    }
 }
 
 function Get-LockSelection {
@@ -320,7 +459,7 @@ function Show-MainMenu {
     Write-Host ""
     Write-Host "[1] Download  在联网电脑下载离线包"
     Write-Host "[2] Check     检查离线包完整性（只读，不修改文件）"
-    Write-Host "[3] Register  登记你手动放进文件夹的安装包"
+    Write-Host "[3] Register  整理并登记 downloads\manual_inbox 里的手动安装包"
     Write-Host "[4] Install   在离线电脑安装环境"
     Write-Host "[5] Verify    验证 GPU / PyTorch CUDA"
     Write-Host "[6] Doctor    诊断当前状态（只读）"
@@ -1476,7 +1615,7 @@ function Assert-NvidiaDriverSourceAvailable {
     $driverDir = Join-PackagePath @("downloads", "drivers")
     $drivers = @(Get-ChildItem -LiteralPath $driverDir -File -Filter "*.exe" -ErrorAction SilentlyContinue)
     if ($drivers.Count -eq 0) {
-        throw "没有 NVIDIA 驱动来源。请先从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe 放到 downloads\drivers，或在 config.json 写入 nvidiaDriver.url。"
+        throw "没有 NVIDIA 驱动来源。请先从 NVIDIA 官方页面下载 RTX 3090 / Windows 10 x64 驱动 exe 放到 downloads\manual_inbox，或在 config.json 写入 nvidiaDriver.url。"
     }
 }
 
@@ -1903,8 +2042,8 @@ function Test-ManualInstallerFile {
 
     switch ($Kind) {
         "nvidia-driver" {
-            if ($name -notmatch "nvidia|geforce|studio|game") {
-                $warnings.Add("驱动文件名没有明显 NVIDIA / GeForce / Studio 关键词：$($File.Name)") | Out-Null
+            if ($name -notmatch "nvidia|geforce|studio|game|desktop-win|dch|whql") {
+                $warnings.Add("驱动文件名没有明显 NVIDIA / GeForce / Studio / DCH / WHQL 关键词：$($File.Name)") | Out-Null
             }
             if ($File.Length -lt 100MB) {
                 $warnings.Add("NVIDIA 驱动文件体积偏小（$sizeMB MB），请确认不是网页下载器。") | Out-Null
@@ -1929,6 +2068,22 @@ function Test-ManualInstallerFile {
         "vscode" {
             if ($name -notmatch "code|vscode|visualstudiocode") {
                 return [pscustomobject]@{ Accept = $false; Warnings = @("VS Code 安装包文件名不明确：$($File.Name)") }
+            }
+        }
+        "python" {
+            if ($name -notmatch "^python-3\.11.*(amd64|x64).*\.exe$") {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("Python 安装包必须是 Python 3.11 x64 / amd64 版本：$($File.Name)") }
+            }
+            if ($name -match "win32|x86|arm64|embed") {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("Python 安装包架构不适合 Win10 x64 + RTX 3090 离线包：$($File.Name)") }
+            }
+        }
+        "vc-runtime" {
+            if ($name -notmatch "vc_redist|vcredist") {
+                return [pscustomobject]@{ Accept = $false; Warnings = @("VC++ Runtime 安装包文件名不明确：$($File.Name)") }
+            }
+            if ($name -notmatch "x64") {
+                $warnings.Add("VC++ Runtime 文件名没有明显 x64 标记，请确认是 64 位版本。") | Out-Null
             }
         }
     }
@@ -1993,12 +2148,19 @@ function Get-RegisterLocalFileEntries {
 function Invoke-RegisterLocalFilesMode {
     Write-Info "开始登记本地手动放入的安装包。此模式会原子更新 manifest；普通 Check 仍然只读。"
     Write-ManualDownloadHelp -Components @("NvidiaDriver", "Git", "CudaToolkit", "VSCode")
+    $organize = Move-ManualInboxFiles
+    foreach ($warning in $organize.Warnings) {
+        Write-Warn $warning
+    }
+    foreach ($item in $organize.Moved) {
+        Write-Ok ("已整理手动安装包：{0} -> {1}" -f $item.Source, $item.Target)
+    }
     $scan = Get-RegisterLocalFileEntries
     foreach ($warning in $scan.Warnings) {
         Write-Warn $warning
     }
     if (@($scan.Entries).Count -eq 0) {
-        throw "没有发现可登记的本地文件。请把 NVIDIA 驱动放入 downloads\drivers，或把 CUDA/Git/VS Code 安装包放入对应 optional 目录。"
+        throw "没有发现可登记的本地文件。请把 NVIDIA 驱动、CUDA/Git/VS Code 安装包放入 downloads\manual_inbox 后重试。"
     }
 
     Write-Host ""
@@ -2076,6 +2238,13 @@ function Invoke-DownloadMode {
 
     Test-InternetEndpoint "https://pypi.org/simple"
     Test-InternetEndpoint "https://download.pytorch.org/whl/cu128"
+    $organize = Move-ManualInboxFiles
+    foreach ($warning in $organize.Warnings) {
+        Write-Warn $warning
+    }
+    foreach ($item in $organize.Moved) {
+        Write-Ok ("已整理手动安装包：{0} -> {1}" -f $item.Source, $item.Target)
+    }
     Assert-NvidiaDriverSourceAvailable $config
     $preScan = Get-RegisterLocalFileEntries
     foreach ($warning in $preScan.Warnings) {
