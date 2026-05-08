@@ -82,6 +82,21 @@ downloads\tools_optional   Git / VS Code 安装包
 
 CUDA Toolkit 必须是离线完整安装包，不接受小体积 network installer。
 
+## 官方下载页面
+
+脚本在 `Download` 和 `RegisterLocalFiles` 中也会显示这些入口：
+
+| 软件 | 官方页面 | 放置位置 |
+| --- | --- | --- |
+| NVIDIA RTX 3090 驱动 | https://www.nvidia.com/Download/index.aspx | `downloads\drivers` |
+| Python 3.11.9 x64 | https://www.python.org/downloads/release/python-3119/ | `downloads\python` |
+| VC++ Runtime x64 | https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170 | `downloads\runtime` |
+| Git for Windows | https://git-scm.com/install/windows.html | `downloads\tools_optional` |
+| CUDA Toolkit | https://developer.nvidia.com/cuda-toolkit-archive | `downloads\cuda_optional` |
+| VS Code | https://code.visualstudio.com/download | `downloads\tools_optional` |
+
+CUDA Toolkit 请选择 Windows / x86_64 / Windows 10 / exe (local)，不要选 network installer。
+
 ## ReuseVenv
 
 默认安装策略是干净环境。如果目标虚拟环境已经存在：

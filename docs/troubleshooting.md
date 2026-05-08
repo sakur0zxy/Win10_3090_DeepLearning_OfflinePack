@@ -18,12 +18,26 @@ powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
 
 说明 NVIDIA 驱动未安装或未重启。请手动运行 `downloads\drivers` 里的驱动安装包，安装完成后重启电脑。
 
+官方下载页面：
+
+```text
+https://www.nvidia.com/Download/index.aspx
+```
+
+选择 GeForce RTX 30 Series / GeForce RTX 3090 / Windows 10 64-bit。
+
 ## DLL load failed
 
 通常是 VC++ Runtime 缺失或不完整。请手动运行：
 
 ```text
 downloads\runtime\VC_redist.x64.exe
+```
+
+官方下载页面：
+
+```text
+https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170
 ```
 
 ## No matching distribution found
@@ -63,6 +77,15 @@ downloads\tools_optional   Git / VS Code 安装包
 ```
 
 登记只会写入 manifest，不会自动安装这些程序。
+
+官方下载页面：
+
+```text
+NVIDIA 驱动: https://www.nvidia.com/Download/index.aspx
+CUDA Toolkit: https://developer.nvidia.com/cuda-toolkit-archive
+Git for Windows: https://git-scm.com/install/windows.html
+VS Code: https://code.visualstudio.com/download
+```
 
 ## 不知道哪里出问题
 

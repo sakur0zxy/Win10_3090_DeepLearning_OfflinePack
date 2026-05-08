@@ -194,6 +194,84 @@ function Get-SelectedOptionalComponents {
     return @($set | Sort-Object)
 }
 
+function Get-ManualDownloadHelpItems {
+    param([string[]]$Components)
+    $items = New-Object 'System.Collections.Generic.List[object]'
+    $wanted = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($component in $Components) {
+        if (-not [string]::IsNullOrWhiteSpace($component)) {
+            $null = $wanted.Add($component)
+        }
+    }
+
+    if ($wanted.Contains("Python")) {
+        $items.Add([pscustomobject]@{
+                Name   = "Python 3.11.9 x64"
+                Url    = "https://www.python.org/downloads/release/python-3119/"
+                SaveTo = "downloads\python\python-3.11.9-amd64.exe"
+                Note   = "脚本通常会自动下载；手动下载时请选择 Windows installer (64-bit)。"
+            }) | Out-Null
+    }
+    if ($wanted.Contains("VcRuntime")) {
+        $items.Add([pscustomobject]@{
+                Name   = "Microsoft VC++ Runtime x64"
+                Url    = "https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170"
+                SaveTo = "downloads\runtime\VC_redist.x64.exe"
+                Note   = "脚本通常会自动下载；手动下载时请选择 X64 版本。"
+            }) | Out-Null
+    }
+    if ($wanted.Contains("NvidiaDriver")) {
+        $items.Add([pscustomobject]@{
+                Name   = "NVIDIA RTX 3090 Windows 10 x64 驱动"
+                Url    = "https://www.nvidia.com/Download/index.aspx"
+                SaveTo = "downloads\drivers"
+                Note   = "请选择 GeForce RTX 30 Series / GeForce RTX 3090 / Windows 10 64-bit，Studio Driver 或 Game Ready Driver 都可以。"
+            }) | Out-Null
+    }
+    if ($wanted.Contains("Git")) {
+        $items.Add([pscustomobject]@{
+                Name   = "Git for Windows x64"
+                Url    = "https://git-scm.com/install/windows.html"
+                SaveTo = "downloads\tools_optional"
+                Note   = "下载 x64 Setup 安装包；这里只登记，不会自动安装。"
+            }) | Out-Null
+    }
+    if ($wanted.Contains("CudaToolkit")) {
+        $items.Add([pscustomobject]@{
+                Name   = "NVIDIA CUDA Toolkit Windows local installer"
+                Url    = "https://developer.nvidia.com/cuda-toolkit-archive"
+                SaveTo = "downloads\cuda_optional"
+                Note   = "请选择 Windows / x86_64 / 10 / exe (local)，不要下载 network installer。"
+            }) | Out-Null
+    }
+    if ($wanted.Contains("VSCode")) {
+        $items.Add([pscustomobject]@{
+                Name   = "Visual Studio Code Windows"
+                Url    = "https://code.visualstudio.com/download"
+                SaveTo = "downloads\tools_optional"
+                Note   = "下载 Windows x64 User Installer 或 System Installer；这里只登记，不会自动安装。"
+            }) | Out-Null
+    }
+    return $items.ToArray()
+}
+
+function Write-ManualDownloadHelp {
+    param([string[]]$Components)
+    $items = @(Get-ManualDownloadHelpItems -Components $Components)
+    if ($items.Count -eq 0) {
+        return
+    }
+    Write-Host ""
+    Write-Host "需要手动下载时可参考这些官方页面：" -ForegroundColor Green
+    foreach ($item in $items) {
+        Write-Host ("- {0}" -f $item.Name)
+        Write-Host ("  官网：{0}" -f $item.Url)
+        Write-Host ("  放到：{0}" -f $item.SaveTo)
+        Write-Host ("  备注：{0}" -f $item.Note)
+    }
+    Write-Host ""
+}
+
 function Get-LockSelection {
     param(
         [Parameter(Mandatory = $true)][string]$ProfileName,
@@ -844,6 +922,7 @@ function Assert-TargetGpu {
     $nvidiaSmi = Get-NvidiaSmiPath
     if ($null -eq $nvidiaSmi) {
         $driverDir = Join-PackagePath @("downloads", "drivers")
+        Write-ManualDownloadHelp -Components @("NvidiaDriver")
         throw "没有检测到 nvidia-smi。请先手动安装 $driverDir 中的 NVIDIA 驱动并重启。"
     }
     $names = Get-NvidiaGpuNames
@@ -1037,6 +1116,7 @@ function Invoke-InstallMode {
         $py = Find-Python311
         if ($null -eq $py) {
             $pythonDir = Join-PackagePath @("downloads", "python")
+            Write-ManualDownloadHelp -Components @("Python")
             throw "没有检测到可用的 Python 3.11 x64，或 pip/venv 不可用。请手动运行 $pythonDir 中的 Python 安装包，启用 pip 和 venv 后重试。"
         }
         Write-Ok "Python 3.11 x64 可用：$($py.Path)"
@@ -1044,6 +1124,7 @@ function Invoke-InstallMode {
         $installStep = "vc-runtime"
         if (-not (Test-VcRuntimeHeuristic)) {
             $runtimeDir = Join-PackagePath @("downloads", "runtime")
+            Write-ManualDownloadHelp -Components @("VcRuntime")
             throw "没有检测到完整 VC++ Runtime 相关 DLL。请手动运行 $runtimeDir 中的 VC_redist.x64.exe 后重试。"
         }
         Write-Ok "VC++ Runtime 启发式检查通过。若后续出现 DLL load failed，请重新安装 VC_redist.x64.exe。"
@@ -1911,6 +1992,7 @@ function Get-RegisterLocalFileEntries {
 
 function Invoke-RegisterLocalFilesMode {
     Write-Info "开始登记本地手动放入的安装包。此模式会原子更新 manifest；普通 Check 仍然只读。"
+    Write-ManualDownloadHelp -Components @("NvidiaDriver", "Git", "CudaToolkit", "VSCode")
     $scan = Get-RegisterLocalFileEntries
     foreach ($warning in $scan.Warnings) {
         Write-Warn $warning
@@ -1968,6 +2050,16 @@ function Invoke-DownloadMode {
     else {
         Write-Info "本次不包含可选组件。"
     }
+    $downloadHelpComponents = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($component in @("Python", "VcRuntime", "NvidiaDriver")) {
+        $downloadHelpComponents.Add($component) | Out-Null
+    }
+    foreach ($component in @($optionalComponents)) {
+        if ($component -in @("Git", "CudaToolkit", "VSCode")) {
+            $downloadHelpComponents.Add([string]$component) | Out-Null
+        }
+    }
+    Write-ManualDownloadHelp -Components ($downloadHelpComponents.ToArray())
     Confirm-Continue "确认在此文件夹下载离线包吗？" "y" | Out-Null
 
     Enable-Tls12
