@@ -74,6 +74,8 @@ Verify 会检查 `torch.version.cuda`，并运行 1024x1024 CUDA 矩阵乘法。
 downloads\manual_inbox
 ```
 
+整理前会显示移动清单，并要求输入 `y` 确认。
+
 如果已经整理完成，对应目录如下：
 
 ```text

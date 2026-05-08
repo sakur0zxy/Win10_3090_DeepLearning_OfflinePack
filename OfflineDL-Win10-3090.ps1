@@ -22,7 +22,7 @@ $Script:InitialBoundParameters = $PSBoundParameters
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
-$Script:ScriptVersion = "0.3.1"
+$Script:ScriptVersion = "0.3.2"
 $Script:SchemaVersion = 1
 $Script:Phase = 2
 $Script:SupportedManifestPhases = @(1, 2)
@@ -341,6 +341,7 @@ function Move-ManualInboxFiles {
     $moved = New-Object 'System.Collections.Generic.List[object]'
     $warnings = New-Object 'System.Collections.Generic.List[string]'
     $candidateFiles = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
+    $plannedMoves = New-Object 'System.Collections.Generic.List[object]'
 
     foreach ($folder in @($manualInbox, $downloadsRoot)) {
         if (Test-Path -LiteralPath $folder) {
@@ -378,13 +379,37 @@ function Move-ManualInboxFiles {
             continue
         }
 
+        $plannedMoves.Add([pscustomobject]@{
+                Kind   = $kind
+                Source = $sourceFull
+                Target = $targetFull
+            }) | Out-Null
+    }
+
+    if ($plannedMoves.Count -gt 0) {
+        Write-Host ""
+        Write-Warn "检测到手动下载的安装包，脚本准备先整理到对应目录："
+        foreach ($plan in $plannedMoves) {
+            Write-Host ("- {0} -> {1}" -f $plan.Source, $plan.Target)
+        }
+        Confirm-Continue "确认移动这些安装包吗？" "y" | Out-Null
+    }
+
+    foreach ($plan in $plannedMoves) {
+        $sourceFull = $plan.Source
+        $targetFull = $plan.Target
+        if (-not (Test-Path -LiteralPath $sourceFull)) {
+            $warnings.Add("计划移动的文件已经不存在，已跳过：$sourceFull") | Out-Null
+            continue
+        }
+
         if (Test-Path -LiteralPath $targetFull) {
             $sourceHash = Get-Sha256 $sourceFull
             $targetHash = Get-Sha256 $targetFull
             if ($sourceHash -eq $targetHash) {
                 Remove-Item -LiteralPath $sourceFull -Force
                 $moved.Add([pscustomobject]@{
-                        Kind   = $kind
+                        Kind   = $plan.Kind
                         Source = $sourceFull
                         Target = $targetFull
                         Action = "目标已存在相同文件，已删除收件箱重复文件"
@@ -398,7 +423,7 @@ function Move-ManualInboxFiles {
 
         Move-Item -LiteralPath $sourceFull -Destination $targetFull -Force
         $moved.Add([pscustomobject]@{
-                Kind   = $kind
+                Kind   = $plan.Kind
                 Source = $sourceFull
                 Target = $targetFull
                 Action = "已移动"

@@ -166,7 +166,7 @@ Download 会：
 downloads\manual_inbox
 ```
 
-运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到 `downloads\tools_optional`、`downloads\cuda_optional` 等对应目录。为了兼容误放，脚本也会尝试识别 `downloads` 根目录下的 exe。
+运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到 `downloads\tools_optional`、`downloads\cuda_optional` 等对应目录。移动前必须显示移动清单，并要求用户输入 `y` 确认。为了兼容误放，脚本也会尝试识别 `downloads` 根目录下的 exe。
 
 ## Check
 

@@ -80,7 +80,7 @@ powershell -ExecutionPolicy Bypass -File .\OfflineDL-Win10-3090.ps1
 downloads\manual_inbox
 ```
 
-运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到对应目录。如果你已经把 exe 放在 `downloads` 根目录，脚本也会尝试识别并整理。
+运行 `Download` 或 `RegisterLocalFiles` 时，脚本会自动识别并整理到对应目录。移动前会列出“从哪里移动到哪里”，并要求输入 `y` 确认；如果你已经把 exe 放在 `downloads` 根目录，脚本也会尝试识别并整理。
 
 整理后的目录：
 
